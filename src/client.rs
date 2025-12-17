@@ -46,7 +46,7 @@ impl HttpClient {
         let sem = self
             .sem_per_host
             .entry(host)
-            .or_insert_with(|| Arc::new(Semaphore::new(5)))
+            .or_insert_with(|| Arc::new(Semaphore::new(3)))
             .clone();
 
         let _global_permit = self.sem_global.acquire().await?;

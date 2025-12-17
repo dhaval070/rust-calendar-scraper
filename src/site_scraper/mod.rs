@@ -1,9 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
-use diesel::dsl::first_value;
 use scraper::{ElementRef, Html, Selector};
 use std::sync::LazyLock;
-use std::sync::{Arc, Mutex};
 // use tower::{Service, ServiceBuilder};
 // use tower_reqwest::{HttpClientLayer, set_header::SetRequestHeaderLayer};
 
@@ -30,6 +28,9 @@ static LOCATION_SELECTOR: LazyLock<Selector> =
 
 static GROUP_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div.subject-group").unwrap());
+
+static ADDRESS_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div.bg_primary > div > div > div > h2 > small").unwrap());
 
 #[derive(Debug)]
 pub struct ScrapedGame {
@@ -71,22 +72,49 @@ impl Scraper {
         let games = self.scrape_games(&site.site_name, &contents)?;
         println!("Scraped {} games from {}", games.len(), site.site_name);
 
+        // let vgames = Arc::new(Mutex::new(&games));
+        //
+        // for i in 0..games.len() {
+        //     let games = vgames.clone();
+        //     tokio::spawn(async move {
+        //         let mut base_url = site.base_url.clone();
+        //
+        //     });
+        // }
+
         for game in games {
             let mut url = game.address_url.clone();
+            // let mut contents: String;
 
             if !url.starts_with("http") {
                 let mut base_url = site.base_url.clone();
                 base_url.push_str(&url);
                 url = base_url.clone();
+                let contents = self.client.get(&url).await?;
+                let addr = self.scrape_local_address(&contents)?;
+                println!("{} {} {}", site.site_name, url, addr);
             } else {
-                continue;
+                let mut addr: String = "address not found".into();
+
+                for _ in 0..3 {
+                    let contents = self.client.get(&url).await?;
+                    addr = match self.scrape_remote_address(&contents) {
+                        Ok(addr) => addr,
+                        Err(_) => {
+                            // eprintln!("{} {} {}", url, e, contents);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(4)).await;
+                            eprintln!("retrying");
+                            continue;
+                        }
+                    };
+                }
+                if addr == "address not found" {
+                    eprintln!("retry exhausted");
+                }
+
+                println!("{} {} {}", site.site_name, url, addr);
             }
-
-            let contents = self.client.get(&url).await?;
-            let addr = self.scrape_address(&contents)?;
-            println!("{} {}", url, addr);
         }
-
         Ok(())
     }
 
@@ -208,7 +236,7 @@ impl Scraper {
         })
     }
 
-    pub fn scrape_address(&self, contents: &str) -> Result<String> {
+    pub fn scrape_local_address(&self, contents: &str) -> Result<String> {
         let doc = Html::parse_document(contents);
         let sel = Selector::parse("div.callout").map_err(|e| anyhow::anyhow!("{}", e))?;
         let element = doc
@@ -227,5 +255,35 @@ impl Scraper {
             .context("text not found")?;
 
         Ok(element.to_string())
+    }
+
+    // e.g. https://www.theonedb.com/Venue/Map/10566?day=19&month=12&year=2025&body=10009
+    pub fn scrape_remote_address(&self, contents: &str) -> Result<String> {
+        let doc = Html::parse_document(contents);
+
+        let element = doc
+            .select(&ADDRESS_SELECTOR)
+            .nth(1)
+            .context("divsel failed")?;
+        let addr = element
+            .text()
+            .next()
+            .expect("addr node not found")
+            .to_string();
+        Ok(addr)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_scrape_remote_address() {
+        let sc = Scraper {
+            client: crate::client::HttpClient::new(),
+        };
+        let contents = fs::read_to_string("addr.html").unwrap();
+        let addr = sc.scrape_remote_address(&contents).unwrap();
+        assert_eq!("728 Mountain St, Haliburton, ON  ", addr);
     }
 }
