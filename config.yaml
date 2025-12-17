@@ -1,0 +1,6 @@
+DB_DSN: mysql://root:root@127.0.0.1/schedules_diesel
+API_KEY: "2D0B32C3-900D-487B-89C5-E8D9012A559B"
+IMPORT_URL: "https://www.agilex.ca/api/GameQuery?date=%s&id=AS0122341&league=%s"
+GAMESHEET_API_KEY: hutNVlSflRgbGjp3rbph
+MAX_REQUESTS_PER_HOST: 5
+GAMESHEET_START_DATE: "2025-09-01"
