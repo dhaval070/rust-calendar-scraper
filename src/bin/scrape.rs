@@ -1,4 +1,6 @@
 use calendar_scraper::Repository;
+use calendar_scraper::address_fetcher;
+use calendar_scraper::client;
 use calendar_scraper::client::HttpClient;
 use calendar_scraper::config;
 use calendar_scraper::site_scraper;
@@ -41,7 +43,13 @@ async fn main() {
 
     // let client = Arc::new(HttpClient::new());
 
-    let scraper = Arc::new(site_scraper::Scraper::new(HttpClient::new()));
+    let addr_fetcher = Arc::new(address_fetcher::AddressFetcher::new(
+        client::HttpClient::new(),
+    ));
+    let scraper = Arc::new(site_scraper::Scraper::new(
+        HttpClient::new(),
+        addr_fetcher.clone(),
+    ));
 
     for site in sc {
         if site.parser_type == "external" || site.parser_type == "custom" {
@@ -63,4 +71,5 @@ async fn main() {
     for h in handles {
         h.await.unwrap();
     }
+    addr_fetcher.total_addresses();
 }

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use scraper::{ElementRef, Html, Selector};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 // use tower::{Service, ServiceBuilder};
 // use tower_reqwest::{HttpClientLayer, set_header::SetRequestHeaderLayer};
 
@@ -41,15 +41,20 @@ pub struct ScrapedGame {
     pub away_team: String,
     pub location: String,
     pub address_url: String,
+    pub address: String,
 }
 
 pub struct Scraper {
     client: HttpClient,
+    address_fetcher: Arc<address_fetcher::AddressFetcher>,
 }
 
 impl Scraper {
-    pub fn new(client: HttpClient) -> Self {
-        Scraper { client }
+    pub fn new(client: HttpClient, address_fetcher: Arc<address_fetcher::AddressFetcher>) -> Self {
+        Scraper {
+            client,
+            address_fetcher,
+        }
     }
 
     pub async fn process_site(
@@ -69,41 +74,25 @@ impl Scraper {
         // Make HTTP GET request
         let contents = self.client.get(&site.base_url).await?;
 
-        let games = self.scrape_games(&site.site_name, &contents)?;
+        let mut games = self.scrape_games(&site.site_name, &contents)?;
         println!("Scraped {} games from {}", games.len(), site.site_name);
 
-        for game in games {
-            let mut url = game.address_url.clone();
+        for game in games.iter_mut() {
             // let mut contents: String;
+            let address = self
+                .address_fetcher
+                .get_address(&site.site_name, &site.base_url, &game.address_url)
+                .await;
 
-            if !url.starts_with("http") {
-                let mut base_url = site.base_url.clone();
-                base_url.push_str(&url);
-                url = base_url.clone();
-                let contents = self.client.get(&url).await?;
-                let addr = self.scrape_local_address(&contents)?;
-                println!("{} {} {}", site.site_name, url, addr);
-            } else {
-                let mut addr: String = "address not found".into();
-
-                for _ in 0..3 {
-                    let contents = self.client.get(&url).await?;
-                    addr = match self.scrape_remote_address(&contents) {
-                        Ok(addr) => addr,
-                        Err(_) => {
-                            // eprintln!("{} {} {}", url, e, contents);
-                            tokio::time::sleep(tokio::time::Duration::from_secs(4)).await;
-                            eprintln!("retrying");
-                            continue;
-                        }
-                    };
+            match address {
+                Ok(addr) => {
+                    game.address = addr;
+                    println!("{}", game.address);
                 }
-                if addr == "address not found" {
-                    eprintln!("retry exhausted");
+                Err(e) => {
+                    println!("address not found {}", e);
                 }
-
-                println!("{} {} {}", site.site_name, url, addr);
-            }
+            };
         }
         Ok(())
     }
@@ -223,6 +212,7 @@ impl Scraper {
             away_team,
             location: loc.into(),
             address_url: address_url.into(),
+            address: "".into(),
         })
     }
 
@@ -266,11 +256,18 @@ impl Scraper {
 
 #[cfg(test)]
 mod test {
+    use crate::{address_fetcher::AddressFetcher, client};
+
     use super::*;
+    use std::fs;
+    use std::sync::Arc;
+
     #[test]
     fn test_scrape_remote_address() {
+        let fetcher = Arc::new(AddressFetcher::new(client::HttpClient::new()));
         let sc = Scraper {
             client: crate::client::HttpClient::new(),
+            address_fetcher: fetcher,
         };
         let contents = fs::read_to_string("addr.html").unwrap();
         let addr = sc.scrape_remote_address(&contents).unwrap();
