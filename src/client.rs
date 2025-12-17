@@ -6,12 +6,13 @@ use std::error::Error;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time;
-use tokio::sync::Semaphore;
+use tokio::sync::{RwLock, Semaphore};
 
 pub struct HttpClient {
     client: reqwest::Client,
     sem_per_host: Arc<DashMap<String, Arc<Semaphore>>>,
     sem_global: Arc<Semaphore>,
+    cache: Arc<DashMap<String, Arc<RwLock<String>>>>,
 }
 
 impl HttpClient {
@@ -34,13 +35,40 @@ impl HttpClient {
         Self {
             client: c,
             sem_per_host: Arc::new(DashMap::new()),
-            sem_global: Arc::new(Semaphore::new(60)),
+            sem_global: Arc::new(Semaphore::new(30)),
+            cache: Arc::new(DashMap::new()),
         }
     }
 
     pub async fn get(&self, url: &str) -> Result<String> {
+        // println!("acquiring lock");
+        let s = self
+            .cache
+            .entry(url.into())
+            .or_insert(Arc::new(RwLock::new("".into())))
+            .clone();
+
+        let guard = s.read().await;
+
+        if *guard != "" {
+            eprintln!("cache hit ");
+            return Ok((*guard).to_string());
+        }
+        drop(guard);
+        let mut guard = s.write().await;
+
+        if *guard != "" {
+            eprintln!("cache hit ");
+            return Ok((*guard).to_string());
+        }
+
         let u = http::uri::Uri::from_str(url)?;
         let host = u.host().unwrap().to_string();
+
+        // println!("acquiring global");
+        let _global_permit = self.sem_global.acquire().await?;
+
+        // println!("acquiring per host");
 
         // Get or create semaphore for this host (thread-safe)
         let sem = self
@@ -48,8 +76,6 @@ impl HttpClient {
             .entry(host)
             .or_insert_with(|| Arc::new(Semaphore::new(3)))
             .clone();
-
-        let _global_permit = self.sem_global.acquire().await?;
         let _permit = sem.acquire().await?;
 
         let response = self.client.get(url).send().await.map_err(|e| {
@@ -71,6 +97,8 @@ impl HttpClient {
             }
             e
         })?;
+        drop(_global_permit);
+        drop(_permit);
         let contents = response.text().await.map_err(|e| {
             eprintln!("Failed to read response text for URL: {}", url);
             eprintln!("Error: {}", e);
@@ -79,6 +107,7 @@ impl HttpClient {
             }
             e
         })?;
+        *guard = contents.clone();
         Ok(contents)
     }
 }

@@ -72,16 +72,6 @@ impl Scraper {
         let games = self.scrape_games(&site.site_name, &contents)?;
         println!("Scraped {} games from {}", games.len(), site.site_name);
 
-        // let vgames = Arc::new(Mutex::new(&games));
-        //
-        // for i in 0..games.len() {
-        //     let games = vgames.clone();
-        //     tokio::spawn(async move {
-        //         let mut base_url = site.base_url.clone();
-        //
-        //     });
-        // }
-
         for game in games {
             let mut url = game.address_url.clone();
             // let mut contents: String;
