@@ -206,3 +206,16 @@ pub struct Rendition {
     pub ratio: String,
     pub bitrate: i64,
 }
+
+#[derive(Insertable)]
+#[diesel(table_name=crate::schema::sites_locations)]
+pub struct SitesLocation {
+    pub site: String,
+    pub location: String,
+    pub location_id: i32,
+    pub loc: Option<String>,
+    pub surface: Option<String>,
+    pub address: Option<String>,
+    pub match_type: Option<String>,
+    pub surface_id: i32,
+}

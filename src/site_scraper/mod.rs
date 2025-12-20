@@ -5,9 +5,9 @@ use std::sync::{Arc, LazyLock};
 // use tower::{Service, ServiceBuilder};
 // use tower_reqwest::{HttpClientLayer, set_header::SetRequestHeaderLayer};
 
-use crate::address_fetcher;
 use crate::client::HttpClient;
 use crate::models;
+use crate::{address_fetcher, repository};
 
 static DAY_DETAILS_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div.day-details").unwrap());
@@ -47,13 +47,19 @@ pub struct ScrapedGame {
 pub struct Scraper {
     client: HttpClient,
     address_fetcher: Arc<address_fetcher::AddressFetcher>,
+    repo: Arc<dyn repository::RepositoryOps + Send + Sync>,
 }
 
 impl Scraper {
-    pub fn new(client: HttpClient, address_fetcher: Arc<address_fetcher::AddressFetcher>) -> Self {
+    pub fn new(
+        client: HttpClient,
+        address_fetcher: Arc<address_fetcher::AddressFetcher>,
+        repo: Arc<dyn repository::RepositoryOps + Send + Sync>,
+    ) -> Self {
         Scraper {
             client,
             address_fetcher,
+            repo,
         }
     }
 
@@ -94,6 +100,25 @@ impl Scraper {
                 }
             };
         }
+        let locations = games
+            .iter()
+            .map(|g| models::SitesLocation {
+                site: site.site_name.clone(),
+                location: g.location.clone(),
+                location_id: 0,
+                loc: None,
+                surface: None,
+                address: None,
+                match_type: None,
+                surface_id: 0,
+            })
+            .collect();
+
+        let repo = Arc::clone(&self.repo);
+        tokio::task::spawn_blocking(move || {
+            repo.import_locations("", locations).unwrap();
+        })
+        .await?;
         Ok(())
     }
 
@@ -265,9 +290,11 @@ mod test {
     #[test]
     fn test_scrape_remote_address() {
         let fetcher = Arc::new(AddressFetcher::new(client::HttpClient::new()));
+        let repo = repository::Repository::new("");
         let sc = Scraper {
             client: crate::client::HttpClient::new(),
             address_fetcher: fetcher,
+            repo: Arc::new(repo),
         };
         let contents = fs::read_to_string("addr.html").unwrap();
         let addr = sc.scrape_remote_address(&contents).unwrap();

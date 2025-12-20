@@ -7,6 +7,14 @@ use diesel::{Connection, MysqlConnection};
 
 use diesel::r2d2::{ConnectionManager, Pool, R2D2Connection};
 
+pub trait RepositoryOps {
+    fn import_locations(
+        &self,
+        _site_name: &str,
+        locations: Vec<models::SitesLocation>,
+    ) -> Result<()>;
+}
+
 pub struct Repository<T>
 where
     T: Connection + R2D2Connection + 'static,
@@ -41,5 +49,21 @@ impl Repository<diesel::MysqlConnection> {
             .load(&mut conn)
             .unwrap();
         Ok(res)
+    }
+}
+
+impl RepositoryOps for Repository<diesel::MysqlConnection> {
+    fn import_locations(
+        &self,
+        _site_name: &str,
+        locations: Vec<models::SitesLocation>,
+    ) -> Result<()> {
+        let mut conn = self.pool.get()?;
+
+        diesel::insert_into(schema::sites_locations::table)
+            .values(&locations)
+            .on_conflict_do_nothing()
+            .execute(&mut conn)?;
+        Ok(())
     }
 }

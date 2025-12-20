@@ -46,9 +46,11 @@ async fn main() {
     let addr_fetcher = Arc::new(address_fetcher::AddressFetcher::new(
         client::HttpClient::new(),
     ));
+
     let scraper = Arc::new(site_scraper::Scraper::new(
         HttpClient::new(),
         addr_fetcher.clone(),
+        Arc::new(repo),
     ));
 
     for site in sc {
