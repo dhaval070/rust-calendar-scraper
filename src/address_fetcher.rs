@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use tokio::sync::RwLock;
 
-#[allow(unused)]
 pub struct AddressFetcher {
     client: HttpClient,
     addresses: Arc<DashMap<String, Arc<RwLock<Address>>>>,
@@ -20,7 +19,6 @@ struct Address {
 }
 
 #[derive(Clone, PartialEq)]
-#[allow(unused)]
 enum AddressStatus {
     InFlight,
     Ready,

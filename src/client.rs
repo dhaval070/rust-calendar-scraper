@@ -130,25 +130,30 @@ impl HttpClient {
             .clone();
         let _permit = sem.acquire().await?;
 
-        let response = self.client.get(url).send().await.map_err(|e| {
-            eprintln!("Request failed for URL: {}", url);
-            eprintln!("Error: {}", e);
-            eprintln!("Is timeout: {}", e.is_timeout());
-            eprintln!("Is connect: {}", e.is_connect());
-            eprintln!("Is request: {}", e.is_request());
-            if let Some(status) = e.status() {
-                eprintln!("Status code: {}", status);
-            }
-            if let Some(source) = Error::source(&e) {
-                eprintln!("Source: {}", source);
-                let mut src = source;
-                while let Some(next) = Error::source(src) {
-                    eprintln!("  Caused by: {}", next);
-                    src = next;
+        let response = self
+            .client_auto_redirect
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| {
+                eprintln!("Request failed for URL: {}", url);
+                eprintln!("Error: {}", e);
+                eprintln!("Is timeout: {}", e.is_timeout());
+                eprintln!("Is connect: {}", e.is_connect());
+                eprintln!("Is request: {}", e.is_request());
+                if let Some(status) = e.status() {
+                    eprintln!("Status code: {}", status);
                 }
-            }
-            e
-        })?;
+                if let Some(source) = Error::source(&e) {
+                    eprintln!("Source: {}", source);
+                    let mut src = source;
+                    while let Some(next) = Error::source(src) {
+                        eprintln!("  Caused by: {}", next);
+                        src = next;
+                    }
+                }
+                e
+            })?;
         drop(_global_permit);
         drop(_permit);
 
