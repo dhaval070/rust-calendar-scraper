@@ -37,6 +37,7 @@ impl Repository<diesel::MysqlConnection> {
 
         if sites.len() == 1 && sites[0] == "all" {
             let res = sites_config::table
+                .filter(schema::sites_config::enabled.eq(true))
                 .select(models::SitesConfig::as_select())
                 .load(&mut conn)
                 .unwrap();

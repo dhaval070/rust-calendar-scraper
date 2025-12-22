@@ -8,6 +8,7 @@ use std::sync::{Arc, LazyLock};
 use crate::client::HttpClient;
 use crate::models;
 use crate::{address_fetcher, repository};
+pub mod month_based;
 
 static DAY_DETAILS_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div.day-details").unwrap());
@@ -74,13 +75,24 @@ impl Scraper {
         let yyyy = from_date.format("%Y").to_string();
 
         let mut url = site.base_url.clone();
-        let s = format!("/Calendar/?Month={}&Year={}", mm, yyyy);
-        url.push_str(s.as_str());
-        // println!("{}", url);
-        // Make HTTP GET request
-        let contents = self.client.get_auto_redirect(&site.base_url).await?;
+        // let s = format!("/Calendar/?Month={}&Year={}", mm, yyyy);
+        let s = match site.parser_type.as_str() {
+            "month_based" => format!("/Schedule/?Month={}&Year={}", mm, yyyy),
+            _ => format!("/Calendar/?Month={}&Year={}", mm, yyyy),
+        };
 
-        let mut games = self.scrape_games(&site.site_name, &contents)?;
+        url.push_str(s.as_str());
+        println!("scraping {}", url);
+        println!("{}", url);
+        // Make HTTP GET request
+        let contents = self.client.get_auto_redirect(&url).await?;
+
+        // let mut games = self.scrape_games(&site.site_name, &contents)?;
+        let mut games = match site.parser_type.as_str() {
+            "month_based" => month_based::parse_schedules(&site.site_name, contents, &mm, &yyyy)?,
+            _ => self.scrape_games(&site.site_name, &contents)?,
+        };
+
         println!("Scraped {} games from {}", games.len(), site.site_name);
 
         for game in games.iter_mut() {
@@ -138,14 +150,6 @@ impl Scraper {
                 .context("failed to parse date")?;
 
             for item in ds.select(&*EVENT_LIST_SELECTOR) {
-                // let game = self.scrape_game(item, dt, site_name).map_err(|e| {
-                //     anyhow::anyhow!(format!(
-                //         "{} : {} : err: {}",
-                //         site_name,
-                //         item.inner_html(),
-                //         e
-                //     ))
-                // });
                 let game = self.scrape_game(item, dt, site_name);
                 let game = match game {
                     Ok(g) => g,
