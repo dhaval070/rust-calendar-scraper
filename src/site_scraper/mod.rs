@@ -78,7 +78,7 @@ impl Scraper {
         url.push_str(s.as_str());
         // println!("{}", url);
         // Make HTTP GET request
-        let contents = self.client.get(&site.base_url).await?;
+        let contents = self.client.get_auto_redirect(&site.base_url).await?;
 
         let mut games = self.scrape_games(&site.site_name, &contents)?;
         println!("Scraped {} games from {}", games.len(), site.site_name);
