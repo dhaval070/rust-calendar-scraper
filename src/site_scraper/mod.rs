@@ -33,7 +33,7 @@ static GROUP_SELECTOR: LazyLock<Selector> =
 static ADDRESS_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div.bg_primary > div > div > div > h2 > small").unwrap());
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ScrapedGame {
     pub site_name: String,
     pub date: chrono::NaiveDateTime,
@@ -75,7 +75,6 @@ impl Scraper {
         let yyyy = from_date.format("%Y").to_string();
 
         let mut url = site.base_url.clone();
-        // let s = format!("/Calendar/?Month={}&Year={}", mm, yyyy);
         let s = match site.parser_type.as_str() {
             "month_based" => format!("/Schedule/?Month={}&Year={}", mm, yyyy),
             _ => format!("/Calendar/?Month={}&Year={}", mm, yyyy),
@@ -83,11 +82,9 @@ impl Scraper {
 
         url.push_str(s.as_str());
         println!("scraping {}", url);
-        println!("{}", url);
         // Make HTTP GET request
         let contents = self.client.get_auto_redirect(&url).await?;
 
-        // let mut games = self.scrape_games(&site.site_name, &contents)?;
         let mut games = match site.parser_type.as_str() {
             "month_based" => month_based::parse_schedules(&site.site_name, contents, &mm, &yyyy)?,
             _ => self.scrape_games(&site.site_name, &contents)?,
@@ -95,23 +92,27 @@ impl Scraper {
 
         println!("Scraped {} games from {}", games.len(), site.site_name);
 
+        let mut tasks = tokio::task::JoinSet::new();
         for game in games.iter_mut() {
-            // let mut contents: String;
-            let address = self
-                .address_fetcher
-                .get_address(&site.site_name, &site.base_url, &game.address_url)
-                .await;
+            let mut game = game.clone();
+            let fetcher = Arc::clone(&self.address_fetcher);
+            let site_name = site.site_name.clone();
+            let base_url = site.base_url.clone();
 
-            match address {
-                Ok(addr) => {
-                    game.address = addr;
-                    println!("{}", game.address);
-                }
-                Err(e) => {
-                    println!("address not found {}", e);
-                }
-            };
+            tasks.spawn(async move {
+                let address = fetcher
+                    .get_address(&site_name, &base_url, &game.address_url)
+                    .await;
+
+                game.address = address.unwrap_or("".into());
+                game
+            });
         }
+        let mut games: Vec<ScrapedGame> = Vec::with_capacity(games.len());
+        while let Some(g) = tasks.join_next().await {
+            games.push(g.unwrap());
+        }
+
         let locations = games
             .iter()
             .map(|g| models::SitesLocation {
@@ -229,10 +230,6 @@ impl Scraper {
 
         let address_url = address_element.attr("href").context("href not found")?;
 
-        // println!(
-        //     "{} - {} - {} vs {} @ {}",
-        //     dt, division, home_team, away_team, loc
-        // );
         Ok(ScrapedGame {
             site_name: site_name.into(),
             date: dt,

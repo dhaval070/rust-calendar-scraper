@@ -49,7 +49,7 @@ impl HttpClient {
             client: c,
             client_auto_redirect: c_auto_redirect,
             sem_per_host: Arc::new(DashMap::new()),
-            sem_global: Arc::new(Semaphore::new(30)),
+            sem_global: Arc::new(Semaphore::new(240)),
         }
     }
 

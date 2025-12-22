@@ -1,6 +1,7 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    #[allow(non_snake_case)]
     RAMP_Locations (RARID) {
         RARID -> Integer,
         name -> Nullable<Text>,

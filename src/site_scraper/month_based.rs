@@ -2,6 +2,30 @@ use anyhow::Result;
 // use diesel::prelude::MysqlConnection;
 use crate::site_scraper::ScrapedGame;
 use scraper::{ElementRef, Selector};
+use std::sync::LazyLock;
+
+static DAY_DETAILS_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div.day-details").unwrap());
+
+static EVENT_LIST_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div.event-list-item").unwrap());
+
+static TIME_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div.time-primary").unwrap());
+
+static SUBJECT_OWNER_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div.subject-owner").unwrap());
+
+static SUBJECT_TEXT_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div.subject-text").unwrap());
+static LOCATION_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div.location").unwrap());
+
+static GROUP_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div.subject-group").unwrap());
+
+static LOC_LINK_SELECTOR: LazyLock<Selector> =
+    LazyLock::new(|| Selector::parse("div > div > div:nth-of-type(3) > a").unwrap());
 
 pub fn parse_schedules(
     site: &str,
@@ -9,34 +33,25 @@ pub fn parse_schedules(
     mm: &str,
     yyyy: &str,
 ) -> Result<Vec<ScrapedGame>> {
-    let day_details_selector = Selector::parse("div.day-details").unwrap();
-    let items_selector = Selector::parse("div.event-list-item").unwrap();
-    let time_selector = Selector::parse("div.time-primary").unwrap();
-    let subj_group_selector = Selector::parse("div.subject-group").unwrap();
-    let subj_owner_selector = Selector::parse("div.subject-owner").unwrap();
-    let subj_text_selector = Selector::parse("div.subject-text").unwrap();
-    let location_selector = Selector::parse("div.location").unwrap();
-    let location_link_selector = Selector::parse("div > div > div:nth-of-type(3) > a").unwrap();
-
     let doc = scraper::Html::parse_document(contents.as_str());
 
     let mut games: Vec<ScrapedGame> = Vec::new();
-    for dd in doc.select(&day_details_selector) {
-        for item in dd.select(&items_selector) {
-            let tt = item.select(&time_selector).next().unwrap();
+    for dd in doc.select(&DAY_DETAILS_SELECTOR) {
+        for item in dd.select(&EVENT_LIST_SELECTOR) {
+            let tt = item.select(&TIME_SELECTOR).next().unwrap();
 
             let date = parse_datetime(tt, mm, yyyy);
 
-            let Some(sgroup) = item.select(&subj_group_selector).next() else {
+            let Some(sgroup) = item.select(&GROUP_SELECTOR).next() else {
                 continue;
             };
-            let Some(sowner) = item.select(&subj_owner_selector).next() else {
+            let Some(sowner) = item.select(&SUBJECT_OWNER_SELECTOR).next() else {
                 continue;
             };
-            let Some(stext) = item.select(&subj_text_selector).next() else {
+            let Some(stext) = item.select(&SUBJECT_TEXT_SELECTOR).next() else {
                 continue;
             };
-            let Some(sloc) = item.select(&location_selector).next() else {
+            let Some(sloc) = item.select(&LOCATION_SELECTOR).next() else {
                 continue;
             };
 
@@ -65,7 +80,7 @@ pub fn parse_schedules(
                 _ => continue,
             };
 
-            let link = match item.select(&location_link_selector).next() {
+            let link = match item.select(&LOC_LINK_SELECTOR).next() {
                 Some(l) => l,
                 _ => {
                     eprintln!("loc link not found");
