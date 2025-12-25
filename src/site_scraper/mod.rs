@@ -2,8 +2,6 @@ use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use scraper::{ElementRef, Html, Selector};
 use std::sync::{Arc, LazyLock};
-// use tower::{Service, ServiceBuilder};
-// use tower_reqwest::{HttpClientLayer, set_header::SetRequestHeaderLayer};
 
 use crate::client::HttpClient;
 use crate::models;
@@ -33,14 +31,15 @@ static GROUP_SELECTOR: LazyLock<Selector> =
 static ADDRESS_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div.bg_primary > div > div > div > h2 > small").unwrap());
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ScrapedGame {
-    pub site_name: String,
     pub date: chrono::NaiveDateTime,
-    pub division: String,
+    pub site_name: String,
     pub home_team: String,
     pub away_team: String,
     pub location: String,
+    pub division: String,
+    #[serde(skip)]
     pub address_url: String,
     pub address: String,
 }
@@ -68,7 +67,7 @@ impl Scraper {
         &self,
         site: &models::SitesConfig,
         from_date: NaiveDate,
-    ) -> Result<()> {
+    ) -> Result<Vec<ScrapedGame>> {
         println!("processing site {}", site.site_name);
 
         let mm = from_date.format("%m").to_string();
@@ -104,7 +103,7 @@ impl Scraper {
                     .get_address(&site_name, &base_url, &game.address_url)
                     .await;
 
-                game.address = address.unwrap_or("".into());
+                game.address = address.unwrap_or("".into()).trim().to_string();
                 game
             });
         }
@@ -132,7 +131,7 @@ impl Scraper {
             repo.import_locations("", locations).unwrap();
         })
         .await?;
-        Ok(())
+        Ok(games)
     }
 
     pub fn scrape_games(&self, site_name: &str, contents: &str) -> Result<Vec<ScrapedGame>> {

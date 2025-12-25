@@ -1,5 +1,6 @@
 pub mod address_fetcher;
 pub mod client;
+pub mod cmdutils;
 pub mod config;
 pub mod models;
 pub mod repository;
