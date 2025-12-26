@@ -8,7 +8,6 @@ use calendar_scraper::site_scraper;
 use clap::Parser;
 use diesel::prelude::MysqlConnection;
 use std::sync::Arc;
-// use std::fs;
 
 #[derive(Parser, Debug)]
 #[command(name = "scrape")]
@@ -50,6 +49,7 @@ async fn main() {
         HttpClient::new(),
         addr_fetcher.clone(),
         Arc::new(repo),
+        args.import_locations,
     ));
 
     let mut path = std::path::PathBuf::new();

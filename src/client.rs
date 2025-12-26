@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::Duration;
 use dashmap::DashMap;
 use http::HeaderValue;
 use reqwest::header;
@@ -30,6 +31,22 @@ impl HttpClient {
                 "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/112.0",
             )
             .unwrap(),
+        );
+        // MBSW_IS_HUMAN=Passed Dec-26 3:03 AM; expires=Wed, 31-Dec-2025 08:03:01 GMT; path=/; SameSite=Strict
+        let mut cookie_value = String::from("MBSW_IS_HUMAN=Passed ");
+        let now = chrono::Utc::now() - Duration::days(1);
+        let from_dt = now.format("%b-%d %I:%M %P").to_string();
+        let upto = now + Duration::days(7);
+        let to_dt = upto.format("%a, %d-%b-%Y %H:%M:%S").to_string();
+
+        cookie_value.push_str(&from_dt);
+        cookie_value.push_str("; expires=");
+        cookie_value.push_str(&to_dt);
+        cookie_value.push_str(" GMT; path=/; SameSite=Strict");
+
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(cookie_value.as_str()).unwrap(),
         );
 
         let c = reqwest::Client::builder()

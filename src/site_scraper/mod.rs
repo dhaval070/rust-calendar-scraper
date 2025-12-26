@@ -48,6 +48,7 @@ pub struct Scraper {
     client: HttpClient,
     address_fetcher: Arc<address_fetcher::AddressFetcher>,
     repo: Arc<dyn repository::RepositoryOps + Send + Sync>,
+    import_locations: bool,
 }
 
 impl Scraper {
@@ -55,11 +56,13 @@ impl Scraper {
         client: HttpClient,
         address_fetcher: Arc<address_fetcher::AddressFetcher>,
         repo: Arc<dyn repository::RepositoryOps + Send + Sync>,
+        import_locations: bool,
     ) -> Self {
         Scraper {
             client,
             address_fetcher,
             repo,
+            import_locations,
         }
     }
 
@@ -103,7 +106,10 @@ impl Scraper {
                     .get_address(&site_name, &base_url, &game.address_url)
                     .await;
 
-                game.address = address.unwrap_or("".into()).trim().to_string();
+                game.address = address.unwrap_or_else(|e| {
+                    eprintln!("{}", e);
+                    "".into()
+                });
                 game
             });
         }
@@ -112,25 +118,27 @@ impl Scraper {
             games.push(g.unwrap());
         }
 
-        let locations = games
-            .iter()
-            .map(|g| models::SitesLocation {
-                site: site.site_name.clone(),
-                location: g.location.clone(),
-                location_id: 0,
-                loc: None,
-                surface: None,
-                address: None,
-                match_type: None,
-                surface_id: 0,
-            })
-            .collect();
+        if self.import_locations {
+            let locations = games
+                .iter()
+                .map(|g| models::SitesLocation {
+                    site: site.site_name.clone(),
+                    location: g.location.clone(),
+                    location_id: 0,
+                    loc: None,
+                    surface: None,
+                    address: None,
+                    match_type: None,
+                    surface_id: 0,
+                })
+                .collect();
 
-        let repo = Arc::clone(&self.repo);
-        tokio::task::spawn_blocking(move || {
-            repo.import_locations("", locations).unwrap();
-        })
-        .await?;
+            let repo = Arc::clone(&self.repo);
+            tokio::task::spawn_blocking(move || {
+                repo.import_locations("", locations).unwrap();
+            })
+            .await?;
+        }
         Ok(games)
     }
 
@@ -150,6 +158,16 @@ impl Scraper {
                 .context("failed to parse date")?;
 
             for item in ds.select(&*EVENT_LIST_SELECTOR) {
+                if item.text().any(|t| {
+                    let t = t.to_lowercase();
+                    t.contains("practice")
+                        || t.contains("tournament")
+                        || t.contains("all day")
+                        || t.contains("cancelled")
+                        || t.contains("time-secondary")
+                }) {
+                    continue;
+                }
                 let game = self.scrape_game(item, dt, site_name);
                 let game = match game {
                     Ok(g) => g,

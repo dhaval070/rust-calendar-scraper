@@ -87,6 +87,9 @@ impl AddressFetcher {
                     return address;
                 }
                 Response::Redirect(redirect) => {
+                    if redirect.contains("/Human/") {
+                        return Err(anyhow::anyhow!("captcha presented for {}", url));
+                    }
                     println!("redirect {}", redirect);
                     // Drop current lock before acquiring new one
                     drop(lock);
