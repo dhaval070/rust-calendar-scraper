@@ -299,6 +299,7 @@ impl Scraper {
 
 #[cfg(test)]
 mod test {
+    use crate::repository::MockRepositoryOps;
     use crate::{address_fetcher::AddressFetcher, client};
 
     use super::*;
@@ -308,11 +309,12 @@ mod test {
     #[test]
     fn test_scrape_remote_address() {
         let fetcher = Arc::new(AddressFetcher::new(client::HttpClient::new()));
-        let repo = repository::Repository::new("");
+        let repo = Arc::new(MockRepositoryOps::new());
         let sc = Scraper {
             client: crate::client::HttpClient::new(),
             address_fetcher: fetcher,
-            repo: Arc::new(repo),
+            repo: repo,
+            import_locations: false,
         };
         let contents = fs::read_to_string("addr.html").unwrap();
         let addr = sc.scrape_remote_address(&contents).unwrap();

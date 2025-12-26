@@ -7,6 +7,7 @@ use diesel::{Connection, MysqlConnection};
 
 use diesel::r2d2::{ConnectionManager, Pool, R2D2Connection};
 
+#[cfg_attr(test, mockall::automock)]
 pub trait RepositoryOps {
     fn import_locations(
         &self,
