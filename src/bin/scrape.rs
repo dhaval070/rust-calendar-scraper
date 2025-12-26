@@ -58,6 +58,8 @@ async fn main() {
 
     let mut handles = Vec::new();
 
+    let report: Arc<dashmap::DashMap<String, usize>> = Arc::new(dashmap::DashMap::new());
+
     for site in sc {
         if site.parser_type == "external" || site.parser_type == "custom" {
             println!("skipping {}", site.site_name);
@@ -69,10 +71,14 @@ async fn main() {
 
         let out_file = args.out_file.clone();
         let p = path.clone();
+        let report = Arc::clone(&report);
 
         let h = tokio::spawn(async move {
             match scraper.process_site(&site, dt).await {
                 Ok(games) => {
+                    let mut rep = report.entry(site.site_name.clone()).or_default();
+                    *rep = games.len();
+
                     let wrt: Box<dyn std::io::Write> = match out_file.as_str() {
                         "-" => Box::new(std::io::stdout()),
                         _ => {
@@ -96,5 +102,14 @@ async fn main() {
     for h in handles {
         h.await.unwrap();
     }
+
+    eprintln!("\n\nSUMMARY");
+    eprintln!("{:-<60}", "");
+    eprintln!("{:<40} | {:>10}", "Site", "Games");
+    eprintln!("{:-<60}", "");
+    for e in report.iter() {
+        eprintln!("{:<40} | {:>10}", e.key(), e.value());
+    }
+    eprintln!("{:-<60}", "");
     addr_fetcher.total_addresses();
 }
