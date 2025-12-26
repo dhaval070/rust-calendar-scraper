@@ -14,6 +14,7 @@ pub trait RepositoryOps {
         _site_name: &str,
         locations: Vec<models::SitesLocation>,
     ) -> Result<()>;
+    fn import_games(&self, games: Vec<models::InsertEvent>) -> Result<()>;
 }
 
 pub struct Repository<T>
@@ -31,7 +32,7 @@ impl Repository<diesel::MysqlConnection> {
         }
     }
 
-    pub fn get_sites(&mut self, sites: Vec<&str>) -> Result<Vec<models::SitesConfig>> {
+    pub fn get_sites(&self, sites: Vec<&str>) -> Result<Vec<models::SitesConfig>> {
         use schema::sites_config;
 
         let mut conn = self.pool.get()?;
@@ -66,6 +67,16 @@ impl RepositoryOps for Repository<diesel::MysqlConnection> {
             .values(&locations)
             .on_conflict_do_nothing()
             .execute(&mut conn)?;
+        Ok(())
+    }
+
+    fn import_games(&self, games: Vec<models::InsertEvent>) -> Result<()> {
+        let mut conn = self.pool.get()?;
+        diesel::insert_into(schema::events::table)
+            .values(&games)
+            .on_conflict_do_nothing()
+            .execute(&mut conn)?;
+
         Ok(())
     }
 }

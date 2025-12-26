@@ -4,6 +4,8 @@ use calendar_scraper::client;
 use calendar_scraper::client::HttpClient;
 use calendar_scraper::cmdutils;
 use calendar_scraper::config;
+use calendar_scraper::models;
+use calendar_scraper::repository::RepositoryOps;
 use calendar_scraper::site_scraper;
 use clap::Parser;
 use diesel::prelude::MysqlConnection;
@@ -20,6 +22,8 @@ struct Args {
     import_locations: bool,
     #[arg(long)]
     out_file: String,
+    #[arg(long)]
+    import_events: bool,
 }
 
 #[tokio::main]
@@ -37,7 +41,7 @@ async fn main() {
     };
 
     let sites = args.sites.split(",").collect();
-    let mut repo = Repository::<MysqlConnection>::new(&cfg.db_dsn);
+    let repo = Arc::new(Repository::<MysqlConnection>::new(&cfg.db_dsn));
 
     let sc = repo.get_sites(sites).unwrap();
 
@@ -48,7 +52,7 @@ async fn main() {
     let scraper = Arc::new(site_scraper::Scraper::new(
         HttpClient::new(),
         addr_fetcher.clone(),
-        Arc::new(repo),
+        repo.clone(),
         args.import_locations,
     ));
 
@@ -72,6 +76,7 @@ async fn main() {
         let out_file = args.out_file.clone();
         let p = path.clone();
         let report = Arc::clone(&report);
+        let repo = repo.clone();
 
         let h = tokio::spawn(async move {
             match scraper.process_site(&site, dt).await {
@@ -91,7 +96,24 @@ async fn main() {
                             Box::new(file)
                         }
                     };
-                    cmdutils::write_output(games, wrt).unwrap();
+                    cmdutils::write_output(&games, wrt).unwrap();
+
+                    if args.import_events {
+                        let events: Vec<models::InsertEvent> = games
+                            .into_iter()
+                            .map(|g| models::InsertEvent {
+                                site: g.site_name,
+                                datetime: g.date,
+                                home_team: g.home_team,
+                                guest_team: g.away_team,
+                                location: Some(g.location),
+                                division: Some(g.division),
+                                location_id: Some(0),
+                                surface_id: 0,
+                            })
+                            .collect();
+                        repo.import_games(events).unwrap();
+                    }
                 }
                 Err(e) => println!("failed {} {}", site.site_name, e),
             };

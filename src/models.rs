@@ -53,6 +53,21 @@ pub struct Event {
     pub date_created: chrono::NaiveDateTime,
 }
 
+#[derive(Debug, Insertable)]
+#[diesel(table_name=crate::schema::events)]
+#[diesel(check_for_backend(diesel::mysql::Mysql))]
+pub struct InsertEvent {
+    pub site: String,
+    pub datetime: chrono::NaiveDateTime,
+    pub home_team: String,
+    pub guest_team: String,
+    pub location: Option<String>,
+    pub division: Option<String>,
+    pub location_id: Option<i32>,
+    pub surface_id: i32,
+    // pub date_created: chrono::NaiveDateTime,
+}
+
 #[derive(Debug, Queryable, Selectable)]
 #[diesel(table_name=crate::schema::events)]
 #[diesel(check_for_backend(diesel::mysql::Mysql))]
