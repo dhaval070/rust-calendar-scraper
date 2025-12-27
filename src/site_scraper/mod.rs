@@ -308,7 +308,7 @@ mod test {
 
     #[test]
     fn test_scrape_remote_address() {
-        let client = Arc::new(client::HttpClient::new());
+        let client = Arc::new(client::HttpClient::new(1, 1));
         let fetcher = Arc::new(AddressFetcher::new(client.clone()));
         let repo = Arc::new(MockRepositoryOps::new());
         let sc = Scraper {

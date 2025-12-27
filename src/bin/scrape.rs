@@ -44,7 +44,10 @@ async fn main() {
 
     let sc = repo.get_sites(sites).unwrap();
 
-    let client = Arc::new(client::HttpClient::new());
+    let client = Arc::new(client::HttpClient::new(
+        cfg.max_requests_per_host,
+        cfg.max_global_requests,
+    ));
 
     let addr_fetcher = Arc::new(address_fetcher::AddressFetcher::new(client.clone()));
 

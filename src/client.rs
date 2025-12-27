@@ -18,6 +18,7 @@ pub struct HttpClient {
     total_requests_made: Mutex<u64>,
     total_retry: Mutex<u64>,
     total_failed: Mutex<u64>,
+    max_requests_per_host: usize,
 }
 
 pub enum Response {
@@ -26,7 +27,7 @@ pub enum Response {
 }
 
 impl HttpClient {
-    pub fn new() -> Self {
+    pub fn new(max_requests_per_host: usize, max_global_requests: usize) -> Self {
         let mut headers = header::HeaderMap::new();
         headers.insert(
             header::USER_AGENT,
@@ -75,10 +76,11 @@ impl HttpClient {
             client: c,
             client_auto_redirect: c_auto_redirect,
             sem_per_host: Arc::new(DashMap::new()),
-            sem_global: Arc::new(Semaphore::new(80)),
+            sem_global: Arc::new(Semaphore::new(max_global_requests)),
             total_failed: Mutex::new(0),
             total_retry: Mutex::new(0),
             total_requests_made: Mutex::new(0),
+            max_requests_per_host,
         }
     }
 
@@ -90,7 +92,7 @@ impl HttpClient {
         let sem = self
             .sem_per_host
             .entry(host)
-            .or_insert_with(|| Arc::new(Semaphore::new(10)))
+            .or_insert_with(|| Arc::new(Semaphore::new(self.max_requests_per_host)))
             .clone();
 
         let mut t = 0;
