@@ -95,6 +95,7 @@ impl HttpClient {
 
         let mut t = 0;
 
+        let _permit = sem.acquire().await?;
         loop {
             if t > 3 {
                 let mut n = self.total_failed.lock().await;
@@ -104,7 +105,6 @@ impl HttpClient {
             t += 1;
 
             let _global_permit = self.sem_global.acquire().await?;
-            let _permit = sem.acquire().await?;
 
             {
                 let mut n = self.total_requests_made.lock().await;
@@ -148,11 +148,13 @@ impl HttpClient {
             let contents = match response.text().await {
                 Ok(c) => c,
                 Err(e) => {
+                    drop(_global_permit);
                     eprintln!("Failed to read response text for URL: {}", url);
                     eprintln!("Error: {}", e);
                     if let Some(source) = Error::source(&e) {
                         eprintln!("Source: {}", source);
                     }
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     continue;
                 }
             };
