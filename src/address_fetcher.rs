@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use tokio::sync::RwLock;
 
 pub struct AddressFetcher {
-    client: HttpClient,
+    client: Arc<HttpClient>,
     addresses: Arc<DashMap<String, Arc<RwLock<Address>>>>,
 }
 
@@ -28,7 +28,7 @@ static ADDRESS_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div.bg_primary > div > div > div > h2 > small").unwrap());
 
 impl AddressFetcher {
-    pub fn new(client: HttpClient) -> Self {
+    pub fn new(client: Arc<HttpClient>) -> Self {
         Self {
             client: client,
             addresses: Arc::new(DashMap::new()),

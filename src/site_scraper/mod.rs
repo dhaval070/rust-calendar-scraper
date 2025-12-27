@@ -45,7 +45,7 @@ pub struct ScrapedGame {
 }
 
 pub struct Scraper {
-    client: HttpClient,
+    pub client: Arc<HttpClient>,
     address_fetcher: Arc<address_fetcher::AddressFetcher>,
     repo: Arc<dyn repository::RepositoryOps + Send + Sync>,
     import_locations: bool,
@@ -53,7 +53,7 @@ pub struct Scraper {
 
 impl Scraper {
     pub fn new(
-        client: HttpClient,
+        client: Arc<HttpClient>,
         address_fetcher: Arc<address_fetcher::AddressFetcher>,
         repo: Arc<dyn repository::RepositoryOps + Send + Sync>,
         import_locations: bool,
@@ -308,10 +308,11 @@ mod test {
 
     #[test]
     fn test_scrape_remote_address() {
-        let fetcher = Arc::new(AddressFetcher::new(client::HttpClient::new()));
+        let client = Arc::new(client::HttpClient::new());
+        let fetcher = Arc::new(AddressFetcher::new(client.clone()));
         let repo = Arc::new(MockRepositoryOps::new());
         let sc = Scraper {
-            client: crate::client::HttpClient::new(),
+            client: client.clone(),
             address_fetcher: fetcher,
             repo: repo,
             import_locations: false,

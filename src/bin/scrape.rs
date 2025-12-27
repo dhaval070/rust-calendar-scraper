@@ -1,7 +1,6 @@
 use calendar_scraper::Repository;
 use calendar_scraper::address_fetcher;
 use calendar_scraper::client;
-use calendar_scraper::client::HttpClient;
 use calendar_scraper::cmdutils;
 use calendar_scraper::config;
 use calendar_scraper::models;
@@ -45,12 +44,12 @@ async fn main() {
 
     let sc = repo.get_sites(sites).unwrap();
 
-    let addr_fetcher = Arc::new(address_fetcher::AddressFetcher::new(
-        client::HttpClient::new(),
-    ));
+    let client = Arc::new(client::HttpClient::new());
+
+    let addr_fetcher = Arc::new(address_fetcher::AddressFetcher::new(client.clone()));
 
     let scraper = Arc::new(site_scraper::Scraper::new(
-        HttpClient::new(),
+        client.clone(),
         addr_fetcher.clone(),
         repo.clone(),
         args.import_locations,
@@ -132,6 +131,7 @@ async fn main() {
     for e in report.iter() {
         eprintln!("{:<40} | {:>10}", e.key(), e.value());
     }
-    eprintln!("{:-<60}", "");
+    scraper.clone().client.summary().await;
+
     addr_fetcher.total_addresses();
 }

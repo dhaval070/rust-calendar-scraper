@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use chrono::Duration;
 use dashmap::DashMap;
 use http::HeaderValue;
@@ -7,7 +7,7 @@ use std::error::Error;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time;
-use tokio::sync::{RwLock, Semaphore};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 use url::Url;
 
 pub struct HttpClient {
@@ -15,6 +15,9 @@ pub struct HttpClient {
     client_auto_redirect: reqwest::Client,
     sem_per_host: Arc<DashMap<String, Arc<Semaphore>>>,
     sem_global: Arc<Semaphore>,
+    total_requests_made: Mutex<u64>,
+    total_retry: Mutex<u64>,
+    total_failed: Mutex<u64>,
 }
 
 pub enum Response {
@@ -50,14 +53,20 @@ impl HttpClient {
         );
 
         let c = reqwest::Client::builder()
-            .timeout(time::Duration::from_secs(60))
+            .timeout(time::Duration::from_secs(120))
+            .connect_timeout(time::Duration::from_secs(10))
+            .pool_max_idle_per_host(3)
+            .pool_idle_timeout(time::Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::none())
             .default_headers(headers.clone())
             .build()
             .unwrap();
 
         let c_auto_redirect = reqwest::Client::builder()
-            .timeout(time::Duration::from_secs(60))
+            .timeout(time::Duration::from_secs(120))
+            .connect_timeout(time::Duration::from_secs(10))
+            .pool_max_idle_per_host(3)
+            .pool_idle_timeout(time::Duration::from_secs(5))
             .default_headers(headers)
             .build()
             .unwrap();
@@ -66,7 +75,10 @@ impl HttpClient {
             client: c,
             client_auto_redirect: c_auto_redirect,
             sem_per_host: Arc::new(DashMap::new()),
-            sem_global: Arc::new(Semaphore::new(240)),
+            sem_global: Arc::new(Semaphore::new(80)),
+            total_failed: Mutex::new(0),
+            total_retry: Mutex::new(0),
+            total_requests_made: Mutex::new(0),
         }
     }
 
@@ -74,68 +86,90 @@ impl HttpClient {
         let u = http::uri::Uri::from_str(url)?;
         let host = u.host().unwrap().to_string();
 
-        // println!("acquiring global");
-        let _global_permit = self.sem_global.acquire().await?;
-
-        // println!("acquiring per host");
-
         // Get or create semaphore for this host (thread-safe)
         let sem = self
             .sem_per_host
             .entry(host)
             .or_insert_with(|| Arc::new(Semaphore::new(10)))
             .clone();
-        let _permit = sem.acquire().await?;
 
-        let response = self.client.get(url).send().await.map_err(|e| {
-            eprintln!("Request failed for URL: {}", url);
-            eprintln!("Error: {}", e);
-            eprintln!("Is timeout: {}", e.is_timeout());
-            eprintln!("Is connect: {}", e.is_connect());
-            eprintln!("Is request: {}", e.is_request());
-            if let Some(status) = e.status() {
-                eprintln!("Status code: {}", status);
+        let mut t = 0;
+
+        loop {
+            if t > 3 {
+                let mut n = self.total_failed.lock().await;
+                *n += 1;
+                return Err(anyhow!("retry failed"));
             }
-            if let Some(source) = Error::source(&e) {
-                eprintln!("Source: {}", source);
-                let mut src = source;
-                while let Some(next) = Error::source(src) {
-                    eprintln!("  Caused by: {}", next);
-                    src = next;
+            t += 1;
+
+            let _global_permit = self.sem_global.acquire().await?;
+            let _permit = sem.acquire().await?;
+
+            {
+                let mut n = self.total_requests_made.lock().await;
+                *n += 1;
+            }
+
+            if t > 1 {
+                let mut n = self.total_retry.lock().await;
+                *n += 1;
+            }
+            let r = self.client.get(url).send().await;
+
+            let response = match r {
+                Ok(s) => s,
+                Err(e) => {
+                    drop(_global_permit);
+                    eprintln!("Request failed for URL: {}. retrying", url);
+                    eprintln!("Error: {}", e);
+                    eprintln!("Is timeout: {}", e.is_timeout());
+                    eprintln!("Is connect: {}", e.is_connect());
+                    eprintln!("Is request: {}", e.is_request());
+
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    continue;
                 }
-            }
-            e
-        })?;
-        drop(_global_permit);
-        drop(_permit);
+            };
+            // drop(_permit);
+            // drop(_global_permit);
 
-        if let Some(redirect) = response.headers().get("location") {
-            let redirect: String = redirect.to_str()?.into();
-            let p = redirect
-                .split("?")
-                .next()
-                .unwrap_or_else(|| redirect.as_str());
-            let mut u = Url::parse(url)?;
-            u.set_path(p);
-            let final_url = u.to_string();
-            return Ok(Response::Redirect(final_url));
-        }
-        let contents = response.text().await.map_err(|e| {
-            eprintln!("Failed to read response text for URL: {}", url);
-            eprintln!("Error: {}", e);
-            if let Some(source) = Error::source(&e) {
-                eprintln!("Source: {}", source);
+            if let Some(redirect) = response.headers().get("location") {
+                let redirect: String = redirect.to_str()?.into();
+                let p = redirect
+                    .split("?")
+                    .next()
+                    .unwrap_or_else(|| redirect.as_str());
+                let mut u = Url::parse(url)?;
+                u.set_path(p);
+                let final_url = u.to_string();
+                return Ok(Response::Redirect(final_url));
             }
-            e
-        })?;
-        Ok(Response::Content(contents))
+            let contents = match response.text().await {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Failed to read response text for URL: {}", url);
+                    eprintln!("Error: {}", e);
+                    if let Some(source) = Error::source(&e) {
+                        eprintln!("Source: {}", source);
+                    }
+                    continue;
+                }
+            };
+            if t > 1 {
+                eprintln!("retry successful for read response");
+            }
+
+            return Ok(Response::Content(contents));
+        }
     }
+
     pub async fn get_auto_redirect(&self, url: &str) -> Result<String> {
         let u = http::uri::Uri::from_str(url)?;
         let host = u.host().unwrap().to_string();
 
         // println!("acquiring global");
-        let _global_permit = self.sem_global.acquire().await?;
+        // let _global_permit = self.sem_global.acquire().await?;
 
         // println!("acquiring per host");
 
@@ -147,31 +181,45 @@ impl HttpClient {
             .clone();
         let _permit = sem.acquire().await?;
 
-        let response = self
-            .client_auto_redirect
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| {
-                eprintln!("Request failed for URL: {}", url);
-                eprintln!("Error: {}", e);
-                eprintln!("Is timeout: {}", e.is_timeout());
-                eprintln!("Is connect: {}", e.is_connect());
-                eprintln!("Is request: {}", e.is_request());
-                if let Some(status) = e.status() {
-                    eprintln!("Status code: {}", status);
-                }
-                if let Some(source) = Error::source(&e) {
-                    eprintln!("Source: {}", source);
-                    let mut src = source;
-                    while let Some(next) = Error::source(src) {
-                        eprintln!("  Caused by: {}", next);
-                        src = next;
+        let mut t = 0;
+        let response = loop {
+            if t > 3 {
+                let mut n = self.total_failed.lock().await;
+                *n += 1;
+                return Err(anyhow!("retry failed"));
+            }
+            t += 1;
+            let _global_permit = self.sem_global.acquire().await?;
+            {
+                let mut n = self.total_requests_made.lock().await;
+                *n += 1;
+            }
+
+            let r = self.client_auto_redirect.get(url).send().await;
+
+            match r {
+                Ok(s) => {
+                    if t > 1 {
+                        let mut n = self.total_requests_made.lock().await;
+                        *n += 1;
+                        eprintln!("retry successful");
                     }
+                    break s;
                 }
-                e
-            })?;
-        drop(_global_permit);
+                Err(e) => {
+                    drop(_global_permit);
+                    eprintln!("Request failed for URL: {}. retrying", url);
+                    eprintln!("Error: {}", e);
+                    eprintln!("Is timeout: {}", e.is_timeout());
+                    eprintln!("Is connect: {}", e.is_connect());
+                    eprintln!("Is request: {}", e.is_request());
+
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    continue;
+                }
+            }
+        };
+
         drop(_permit);
 
         let contents = response.text().await.map_err(|e| {
@@ -181,8 +229,27 @@ impl HttpClient {
                 eprintln!("Source: {}", source);
             }
             e
-        })?;
-        Ok(contents)
+        });
+
+        match contents {
+            Ok(c) => Ok(c),
+            Err(e) => {
+                let mut n = self.total_failed.lock().await;
+                *n += 1;
+                Err(anyhow!("{}", e))
+            }
+        }
+    }
+
+    pub async fn summary(&self) {
+        let total_requests = self.total_requests_made.lock().await;
+        let total_retry = self.total_retry.lock().await;
+        let total_failed = self.total_failed.lock().await;
+
+        eprintln!("{:-<60}", "");
+        eprintln!("{:<30}: {}", "Total Requests", *total_requests);
+        eprintln!("{:<30}: {}", "Total Retries", *total_retry);
+        eprintln!("{:<30}: {}", "Total Failed", *total_failed);
     }
 }
 
@@ -205,7 +272,9 @@ impl HttpClientCached {
         );
 
         let c = reqwest::Client::builder()
-            .timeout(time::Duration::from_secs(60))
+            .timeout(time::Duration::from_secs(120))
+            .connect_timeout(time::Duration::from_secs(30))
+            .pool_max_idle_per_host(20)
             .default_headers(headers)
             .build()
             .unwrap();
@@ -213,7 +282,7 @@ impl HttpClientCached {
         Self {
             client: c,
             sem_per_host: Arc::new(DashMap::new()),
-            sem_global: Arc::new(Semaphore::new(30)),
+            sem_global: Arc::new(Semaphore::new(50)),
             cache: Arc::new(DashMap::new()),
         }
     }
