@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use scraper::{ElementRef, Html, Selector};
+use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use crate::client::HttpClient;
@@ -119,23 +120,29 @@ impl Scraper {
         }
 
         if self.import_locations {
-            let locations = games
-                .iter()
-                .map(|g| models::SitesLocation {
-                    site: site.site_name.clone(),
-                    location: g.location.clone(),
-                    location_id: 0,
-                    loc: None,
-                    surface: None,
-                    address: None,
-                    match_type: None,
-                    surface_id: 0,
-                })
-                .collect();
+            let mut h = HashMap::new();
+            for g in games.iter() {
+                h.insert(
+                    g.location.clone(),
+                    models::SitesLocation {
+                        site: site.site_name.clone(),
+                        location: g.location.clone(),
+                        location_id: 0,
+                        loc: None,
+                        surface: None,
+                        address: Some(g.address.clone()),
+                        match_type: None,
+                        surface_id: 0,
+                    },
+                );
+            }
 
             let repo = Arc::clone(&self.repo);
+            let site_name = site.site_name.clone();
+            let site_locations = h.into_values().collect();
+
             tokio::task::spawn_blocking(move || {
-                repo.import_locations("", locations).unwrap();
+                repo.import_locations(&site_name, site_locations).unwrap();
             })
             .await?;
         }
