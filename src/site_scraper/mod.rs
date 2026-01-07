@@ -6,7 +6,9 @@ use std::sync::{Arc, LazyLock};
 
 use crate::client::HttpClient;
 use crate::models;
+use crate::site_scraper::gamesheet::Gamesheet;
 use crate::{address_fetcher, repository};
+pub mod gamesheet;
 pub mod month_based;
 
 static DAY_DETAILS_SELECTOR: LazyLock<Selector> =
@@ -50,6 +52,7 @@ pub struct Scraper {
     address_fetcher: Arc<address_fetcher::AddressFetcher>,
     repo: Arc<dyn repository::RepositoryOps + Send + Sync>,
     import_locations: bool,
+    gamesheet: Gamesheet,
 }
 
 impl Scraper {
@@ -58,12 +61,14 @@ impl Scraper {
         address_fetcher: Arc<address_fetcher::AddressFetcher>,
         repo: Arc<dyn repository::RepositoryOps + Send + Sync>,
         import_locations: bool,
+        gamesheet: Gamesheet,
     ) -> Self {
         Scraper {
             client,
             address_fetcher,
             repo,
             import_locations,
+            gamesheet,
         }
     }
 
@@ -77,46 +82,60 @@ impl Scraper {
         let mm = from_date.format("%m").to_string();
         let yyyy = from_date.format("%Y").to_string();
 
-        let mut url = site.base_url.clone();
-        let s = match site.parser_type.as_str() {
-            "month_based" => format!("/Schedule/?Month={}&Year={}", mm, yyyy),
-            _ => format!("/Calendar/?Month={}&Year={}", mm, yyyy),
-        };
+        let mut games: Vec<ScrapedGame>;
 
-        url.push_str(s.as_str());
-        println!("scraping {}", url);
-        // Make HTTP GET request
-        let contents = self.client.get_auto_redirect(&url).await?;
+        if site.site_name.starts_with("gs_") {
+            games = self
+                .gamesheet
+                .scrape_games(from_date.format("%Y-%m-%d").to_string(), &site.site_name)
+                .await?;
+        } else {
+            let mut url = site.base_url.clone();
+            let s = match site.parser_type.as_str() {
+                "month_based" => format!("/Schedule/?Month={}&Year={}", mm, yyyy),
+                _ => format!("/Calendar/?Month={}&Year={}", mm, yyyy),
+            };
 
-        let mut games = match site.parser_type.as_str() {
-            "month_based" => month_based::parse_schedules(&site.site_name, contents, &mm, &yyyy)?,
-            _ => self.scrape_games(&site.site_name, &contents)?,
-        };
+            url.push_str(s.as_str());
+            println!("scraping {}", url);
+            // Make HTTP GET request
+            let contents = self.client.get_auto_redirect(&url, None).await?;
+            games = match site.parser_type.as_str() {
+                "month_based" => {
+                    month_based::parse_schedules(&site.site_name, contents, &mm, &yyyy)?
+                }
+                _ => self.scrape_games(&site.site_name, &contents)?,
+            };
+        }
 
         println!("Scraped {} games from {}", games.len(), site.site_name);
 
         let mut tasks = tokio::task::JoinSet::new();
         for game in games.iter_mut() {
-            let mut game = game.clone();
-            let fetcher = Arc::clone(&self.address_fetcher);
-            let site_name = site.site_name.clone();
-            let base_url = site.base_url.clone();
+            if game.address_url != "" {
+                let mut game = game.clone();
+                let fetcher = Arc::clone(&self.address_fetcher);
+                let site_name = site.site_name.clone();
+                let base_url = site.base_url.clone();
 
-            tasks.spawn(async move {
-                let address = fetcher
-                    .get_address(&site_name, &base_url, &game.address_url)
-                    .await;
+                tasks.spawn(async move {
+                    let address = fetcher
+                        .get_address(&site_name, &base_url, &game.address_url)
+                        .await;
 
-                game.address = address.unwrap_or_else(|e| {
-                    eprintln!("{}", e);
-                    "".into()
+                    game.address = address.unwrap_or_else(|e| {
+                        eprintln!("{}", e);
+                        "".into()
+                    });
+                    game
                 });
-                game
-            });
+            }
         }
-        let mut games: Vec<ScrapedGame> = Vec::with_capacity(games.len());
-        while let Some(g) = tasks.join_next().await {
-            games.push(g.unwrap());
+        if tasks.len() > 0 {
+            let mut games: Vec<ScrapedGame> = Vec::with_capacity(games.len());
+            while let Some(g) = tasks.join_next().await {
+                games.push(g.unwrap());
+            }
         }
 
         if self.import_locations {
@@ -323,6 +342,7 @@ mod test {
             address_fetcher: fetcher,
             repo: repo,
             import_locations: false,
+            gamesheet: Gamesheet::new(client.clone(), "".into(), HashMap::new()),
         };
         let contents = fs::read_to_string("addr.html").unwrap();
         let addr = sc.scrape_remote_address(&contents).unwrap();

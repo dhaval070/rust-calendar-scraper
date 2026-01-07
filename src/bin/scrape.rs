@@ -6,6 +6,7 @@ use calendar_scraper::config;
 use calendar_scraper::models;
 use calendar_scraper::repository::RepositoryOps;
 use calendar_scraper::site_scraper;
+use calendar_scraper::site_scraper::gamesheet;
 use clap::Parser;
 use diesel::prelude::MysqlConnection;
 use std::sync::Arc;
@@ -42,7 +43,7 @@ async fn main() {
     let sites = args.sites.split(",").collect();
     let repo = Arc::new(Repository::<MysqlConnection>::new(&cfg.db_dsn));
 
-    let sc = repo.get_sites(sites).unwrap();
+    let mut sc = repo.get_sites(sites).unwrap();
 
     let client = Arc::new(client::HttpClient::new(
         cfg.max_requests_per_host,
@@ -51,11 +52,13 @@ async fn main() {
 
     let addr_fetcher = Arc::new(address_fetcher::AddressFetcher::new(client.clone()));
 
+    let seasons = repo.gamesheet_season_map();
     let scraper = Arc::new(site_scraper::Scraper::new(
         client.clone(),
         addr_fetcher.clone(),
         repo.clone(),
         args.import_locations,
+        gamesheet::Gamesheet::new(client.clone(), cfg.gamesheet_api_key.clone(), seasons),
     ));
 
     let mut path = std::path::PathBuf::new();
@@ -65,6 +68,8 @@ async fn main() {
     let mut handles = Vec::new();
 
     let report: Arc<dashmap::DashMap<String, usize>> = Arc::new(dashmap::DashMap::new());
+
+    sc.truncate(10);
 
     for site in sc {
         if site.parser_type == "external" || site.parser_type == "custom" {

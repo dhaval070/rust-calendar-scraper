@@ -44,3 +44,42 @@ where
         .load(conn)
         .unwrap()
 }
+
+pub mod types {
+    use std::fmt::Display;
+
+    #[derive(PartialEq, Eq, Hash)]
+    pub struct SiteName(pub String);
+
+    impl From<&str> for SiteName {
+        fn from(value: &str) -> Self {
+            SiteName(value.to_string())
+        }
+    }
+
+    pub struct SeasonID(u32);
+
+    impl Into<u32> for SeasonID {
+        fn into(self) -> u32 {
+            self.0
+        }
+    }
+
+    impl From<u32> for SeasonID {
+        fn from(value: u32) -> Self {
+            Self(value)
+        }
+    }
+
+    impl Into<String> for SeasonID {
+        fn into(self) -> String {
+            self.0.to_string()
+        }
+    }
+
+    impl Display for SeasonID {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_fmt(format_args!("{}", self.0))
+        }
+    }
+}

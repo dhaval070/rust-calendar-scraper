@@ -218,7 +218,7 @@ diesel::table! {
         site -> Varchar,
         #[max_length = 128]
         location -> Varchar,
-        location_id -> Nullable<Integer>,
+        location_id -> Integer,
         #[max_length = 64]
         loc -> Nullable<Varchar>,
         #[max_length = 64]

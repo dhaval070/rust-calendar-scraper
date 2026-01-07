@@ -1,4 +1,4 @@
-use diesel::{Insertable, Queryable, Selectable};
+use diesel::{HasQuery, Insertable, Queryable, Selectable};
 use std::collections::hash_map::HashMap;
 
 #[derive(Debug, Queryable, Selectable)]
@@ -101,25 +101,26 @@ pub struct Provnice {
     pub country: String,
 }
 
-#[derive(Insertable)]
+#[derive(Insertable, Queryable, Selectable, Clone)]
 #[diesel(table_name=crate::schema::locations)]
+#[diesel(check_for_backend(diesel::mysql::Mysql))]
 pub struct Location {
     pub id: i32,
-    pub address1: String,
-    pub address2: String,
-    pub city: String,
+    pub address1: Option<String>,
+    pub address2: Option<String>,
+    pub city: Option<String>,
     pub name: String,
-    pub uuid: String,
-    pub recording_hours_local: String,
-    pub postal_code: String,
-    pub all_sheets_count: i32,
-    pub longitude: f32,
-    pub latitude: f32,
-    pub logo_url: String,
+    pub uuid: Option<String>,
+    pub recording_hours_local: Option<String>,
+    pub postal_code: Option<String>,
+    pub all_sheets_count: Option<i32>,
+    pub longitude: Option<f32>,
+    pub latitude: Option<f32>,
+    pub logo_url: Option<String>,
     pub province_id: Option<i32>,
-    pub venue_status: String,
-    pub zone: String,
-    pub total_surfaces: i32,
+    pub venue_status: Option<String>,
+    pub zone: Option<String>,
+    pub total_surfaces: Option<i32>,
     pub deleted_at: Option<chrono::NaiveDateTime>,
 }
 
@@ -222,8 +223,9 @@ pub struct Rendition {
     pub bitrate: i64,
 }
 
-#[derive(Insertable)]
+#[derive(Insertable, Queryable, Selectable)]
 #[diesel(table_name=crate::schema::sites_locations)]
+#[diesel(check_for_backend(diesel::mysql::Mysql))]
 pub struct SitesLocation {
     pub site: String,
     pub location: String,
@@ -233,4 +235,30 @@ pub struct SitesLocation {
     pub address: Option<String>,
     pub match_type: Option<String>,
     pub surface_id: i32,
+}
+
+#[derive(HasQuery)]
+#[diesel(table_name=crate::schema::sites_locations)]
+#[diesel(check_for_backend(diesel::mysql::Mysql))]
+pub struct SitesLoc {
+    pub site: String,
+    pub location: String,
+    pub location_id: i32,
+    pub surface_id: i32,
+}
+
+#[derive(HasQuery, Clone, Debug)]
+#[diesel(table_name=crate::schema::surfaces)]
+pub struct SurfaceQuery {
+    pub id: i32,
+    pub location_id: i32,
+    pub name: String,
+}
+
+#[derive(HasQuery, Clone, Debug)]
+#[diesel(table_name=crate::schema::gamesheet_seasons)]
+pub struct SeasonsQuery {
+    pub id: u32,
+    pub title: Option<String>,
+    pub site: String,
 }

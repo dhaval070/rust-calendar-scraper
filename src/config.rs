@@ -12,6 +12,9 @@ pub struct AppConfig {
 
     #[serde(rename = "MAX_GLOBAL_REQUESTS")]
     pub max_global_requests: usize,
+
+    #[serde(rename = "GAMESHEET_API_KEY")]
+    pub gamesheet_api_key: String,
 }
 
 pub fn load() -> AppConfig {

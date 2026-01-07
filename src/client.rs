@@ -168,14 +168,24 @@ impl HttpClient {
         }
     }
 
-    pub async fn get_auto_redirect(&self, url: &str) -> Result<String> {
+    pub async fn get_auto_redirect(
+        &self,
+        url: &str,
+        headers: Option<http::HeaderMap>,
+    ) -> Result<String> {
         let u = http::uri::Uri::from_str(url)?;
-        let host = u.host().unwrap().to_string();
+        let host = u
+            .host()
+            .ok_or(anyhow!("host not found {}", url))?
+            .to_string();
 
-        // println!("acquiring global");
-        // let _global_permit = self.sem_global.acquire().await?;
+        let mut req;
 
-        // println!("acquiring per host");
+        req = self.client.request(http::Method::GET, u.to_string());
+        if let Some(h) = headers {
+            req = req.headers(h);
+        }
+        let req = req.build()?;
 
         // Get or create semaphore for this host (thread-safe)
         let sem = self
@@ -199,7 +209,8 @@ impl HttpClient {
                 *n += 1;
             }
 
-            let r = self.client_auto_redirect.get(url).send().await;
+            let req = req.try_clone().ok_or(anyhow!("req err"))?;
+            let r = self.client_auto_redirect.execute(req).await;
 
             match r {
                 Ok(s) => {
