@@ -21,6 +21,7 @@ url = "2.5.7"
 csv = "1.4.0"
 regex = "1.12.2"
 strfmt = "0.2.5"
+axum = "0.8.8"
 
 [dev-dependencies]
 mockall = "0.14.0"

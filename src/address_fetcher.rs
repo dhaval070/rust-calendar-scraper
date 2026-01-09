@@ -1,4 +1,5 @@
 use crate::client::{HttpClient, Response};
+use anyhow::anyhow;
 use anyhow::{Context, Result};
 use dashmap::DashMap;
 use scraper::{Html, Selector};
@@ -39,17 +40,27 @@ impl AddressFetcher {
         println!("total addresses: {}", self.addresses.clone().len());
     }
 
-    pub async fn get_address(&self, _site: &str, base_url: &str, url: &str) -> Result<String> {
-        let (mut url, is_local) = self.build_abs_url(base_url, url);
+    pub async fn get_address(&self, _site: &str, scrape_url: &str, class: &str) -> Result<String> {
+        let is_local = class == "local";
+        let mut scrape_url: String = scrape_url.into();
 
-        let mut current_addr = self.get_cached(&url);
+        if class == "local" && scrape_url.contains("Venues") {
+            // remove query string params from https://aceshockey.com/Venues/12/?Day=10&Month=01&Year=2026 for caching
+            scrape_url = scrape_url
+                .split_terminator("?")
+                .next()
+                .ok_or(anyhow!("failed to split url {}", scrape_url))?
+                .to_string();
+        }
+
+        let mut current_addr = self.get_cached(&scrape_url);
         let orig_addr = current_addr.clone();
 
         loop {
             // Fast path: check read lock first
             let r = current_addr.read().await;
             if r.status == AddressStatus::Ready {
-                println!("cache hit");
+                println!("cache hit {}", scrape_url);
                 return Ok(r.address.clone());
             }
             drop(r);
@@ -59,12 +70,12 @@ impl AddressFetcher {
 
             // Double-check after acquiring write lock
             if lock.status == AddressStatus::Ready {
-                println!("cache hit");
+                println!("cache hit {}", scrape_url);
                 return Ok(lock.address.clone());
             }
 
             // Fetch URL while holding write lock
-            match self.client.get(&url).await? {
+            match self.client.get(&scrape_url).await? {
                 Response::Content(contents) => {
                     // Scrape address
                     let address = if is_local {
@@ -88,7 +99,7 @@ impl AddressFetcher {
                 }
                 Response::Redirect(redirect) => {
                     if redirect.contains("/Human/") {
-                        return Err(anyhow::anyhow!("captcha presented for {}", url));
+                        return Err(anyhow::anyhow!("captcha presented for {}", scrape_url));
                     }
                     println!("redirect {}", redirect);
                     // Drop current lock before acquiring new one
@@ -96,7 +107,7 @@ impl AddressFetcher {
 
                     // Switch to redirect URL's cache entry
                     current_addr = self.get_cached(&redirect);
-                    url = redirect;
+                    scrape_url = redirect;
                     // Loop will acquire lock on the new URL
                 }
             };
@@ -150,18 +161,5 @@ impl AddressFetcher {
                 }))
             })
             .clone()
-    }
-
-    fn build_abs_url(&self, base_url: &str, url: &str) -> (String, bool) {
-        let mut is_local: bool = false;
-        let url = if !url.starts_with("http") {
-            is_local = true;
-            let mut base_url = base_url.to_string();
-            base_url.push_str(&url);
-            base_url
-        } else {
-            url.to_string()
-        };
-        (url, is_local)
     }
 }

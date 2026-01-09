@@ -82,7 +82,7 @@ impl Scraper {
         let mm = from_date.format("%m").to_string();
         let yyyy = from_date.format("%Y").to_string();
 
-        let mut games: Vec<ScrapedGame>;
+        let games: Vec<ScrapedGame>;
 
         if site.site_name.starts_with("gs_") {
             games = self
@@ -111,31 +111,30 @@ impl Scraper {
         println!("Scraped {} games from {}", games.len(), site.site_name);
 
         let mut tasks = tokio::task::JoinSet::new();
-        for game in games.iter_mut() {
-            if game.address_url != "" {
-                let mut game = game.clone();
-                let fetcher = Arc::clone(&self.address_fetcher);
-                let site_name = site.site_name.clone();
-                let base_url = site.base_url.clone();
 
-                tasks.spawn(async move {
-                    let address = fetcher
-                        .get_address(&site_name, &base_url, &game.address_url)
-                        .await;
+        for mut game in games {
+            let fetcher = Arc::clone(&self.address_fetcher);
+            let site_name = site.site_name.clone();
+            let base_url = site.base_url.clone();
+
+            tasks.spawn(async move {
+                if game.address_url != "" {
+                    let (url, class) = build_abs_url(&base_url, &game.address_url);
+                    let address = fetcher.get_address(&site_name, &url, &class).await;
 
                     game.address = address.unwrap_or_else(|e| {
                         eprintln!("{}", e);
                         "".into()
                     });
-                    game
-                });
-            }
+                    println!("url: {}, address: {}", url, game.address);
+                }
+                game
+            });
         }
-        if tasks.len() > 0 {
-            let mut games: Vec<ScrapedGame> = Vec::with_capacity(games.len());
-            while let Some(g) = tasks.join_next().await {
-                games.push(g.unwrap());
-            }
+        let mut games: Vec<ScrapedGame> = Vec::new();
+
+        while let Some(g) = tasks.join_next().await {
+            games.push(g.unwrap());
         }
 
         if self.import_locations {
@@ -321,6 +320,19 @@ impl Scraper {
             .to_string();
         Ok(addr)
     }
+}
+
+fn build_abs_url(base_url: &str, url: &str) -> (String, String) {
+    let mut class: String = "remote".into();
+    let url = if !url.starts_with("http") {
+        class = "local".into();
+        let mut base_url = base_url.to_string();
+        base_url.push_str(&url);
+        base_url
+    } else {
+        url.to_string()
+    };
+    (url, class)
 }
 
 #[cfg(test)]
