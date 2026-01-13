@@ -162,4 +162,34 @@ impl AddressFetcher {
             })
             .clone()
     }
+
+    pub async fn get_snapshot(&self) -> Vec<(String, String)> {
+        let mut col: Vec<(String, Arc<RwLock<Address>>)> = Vec::with_capacity(self.addresses.len());
+
+        for addr in self.addresses.iter() {
+            let key = addr.key().clone();
+            let g = addr.value().clone();
+            col.push((key, g));
+        }
+        let mut result: Vec<(String, String)> = Vec::with_capacity(col.len());
+
+        for item in col.into_iter() {
+            let v = item.1.read().await;
+            if v.status == AddressStatus::Ready {
+                result.push((item.0, v.address.clone()));
+            }
+        }
+        result
+    }
+
+    pub fn load(&self, data: Vec<(String, String)>) {
+        for entry in data {
+            self.addresses.entry(entry.0).or_insert_with(|| {
+                Arc::new(RwLock::new(Address {
+                    status: AddressStatus::Ready,
+                    address: entry.1,
+                }))
+            });
+        }
+    }
 }
