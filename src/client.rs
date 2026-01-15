@@ -215,8 +215,6 @@ impl HttpClient {
             match r {
                 Ok(s) => {
                     if t > 1 {
-                        let mut n = self.total_requests_made.lock().await;
-                        *n += 1;
                         eprintln!("retry successful");
                     }
                     break s;
@@ -238,8 +236,7 @@ impl HttpClient {
         drop(_permit);
 
         let contents = response.text().await.map_err(|e| {
-            eprintln!("Failed to read response text for URL: {}", url);
-            eprintln!("Error: {}", e);
+            eprintln!("Failed to read response text for URL: {}, err: {}", url, e);
             if let Some(source) = Error::source(&e) {
                 eprintln!("Source: {}", source);
             }

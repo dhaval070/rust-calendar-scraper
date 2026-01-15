@@ -27,7 +27,7 @@ diesel::table! {
 diesel::table! {
     events (id) {
         id -> Unsigned<Bigint>,
-        #[max_length = 64]
+        #[max_length = 255]
         site -> Varchar,
         #[max_length = 64]
         source_type -> Nullable<Varchar>,
@@ -47,6 +47,7 @@ diesel::table! {
         location_id -> Nullable<Integer>,
         surface_id -> Integer,
         date_created -> Timestamp,
+        edate -> Nullable<Date>,
     }
 }
 

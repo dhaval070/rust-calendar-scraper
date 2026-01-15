@@ -401,11 +401,14 @@ impl RepositoryOps for Repository<diesel::MysqlConnection> {
 
     fn import_games(&self, games: Vec<models::InsertEvent>) -> Result<()> {
         let mut conn = self.pool.get()?;
-        diesel::insert_into(schema::events::table)
-            .values(&games)
-            .on_conflict_do_nothing()
-            .execute(&mut conn)?;
-
-        Ok(())
+        conn.transaction(|conn| {
+            for chunk in games.chunks(1000) {
+                diesel::insert_into(schema::events::table)
+                    .values(chunk)
+                    .on_conflict_do_nothing()
+                    .execute(conn)?;
+            }
+            Ok(())
+        })
     }
 }

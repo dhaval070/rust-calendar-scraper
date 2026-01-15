@@ -72,7 +72,7 @@ async fn main() {
     sc.truncate(10);
 
     for site in sc {
-        if site.parser_type == "external" || site.parser_type == "custom" {
+        if site.parser_type == "external" {
             println!("skipping {}", site.site_name);
             continue;
         }
@@ -119,6 +119,7 @@ async fn main() {
                                 surface_id: 0,
                             })
                             .collect();
+                        println!("total events {}", events.len());
                         repo.import_games(events).unwrap();
                     }
                 }

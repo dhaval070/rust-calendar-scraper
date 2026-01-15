@@ -1,35 +1,17 @@
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
-use scraper::{ElementRef, Html, Selector};
+use scraper::{Html, Selector};
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use crate::client::HttpClient;
-use crate::models;
+use crate::models::{self, SitesConfig};
 use crate::site_scraper::gamesheet::Gamesheet;
 use crate::{address_fetcher, repository};
+pub mod atlantic;
+pub mod day_deails;
 pub mod gamesheet;
 pub mod month_based;
-
-static DAY_DETAILS_SELECTOR: LazyLock<Selector> =
-    LazyLock::new(|| Selector::parse("div.day-details").unwrap());
-
-static EVENT_LIST_SELECTOR: LazyLock<Selector> =
-    LazyLock::new(|| Selector::parse("div.event-list-item").unwrap());
-
-static TIME_SELECTOR: LazyLock<Selector> =
-    LazyLock::new(|| Selector::parse("div.time-primary").unwrap());
-
-static SUBJECT_OWNER_SELECTOR: LazyLock<Selector> =
-    LazyLock::new(|| Selector::parse("div.subject-owner").unwrap());
-
-static SUBJECT_TEXT_SELECTOR: LazyLock<Selector> =
-    LazyLock::new(|| Selector::parse("div.subject-text").unwrap());
-static LOCATION_SELECTOR: LazyLock<Selector> =
-    LazyLock::new(|| Selector::parse("div.location").unwrap());
-
-static GROUP_SELECTOR: LazyLock<Selector> =
-    LazyLock::new(|| Selector::parse("div.subject-group").unwrap());
 
 static ADDRESS_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div.bg_primary > div > div > div > h2 > small").unwrap());
@@ -82,31 +64,29 @@ impl Scraper {
         let mm = from_date.format("%m").to_string();
         let yyyy = from_date.format("%Y").to_string();
 
-        let games: Vec<ScrapedGame>;
-
-        if site.site_name.starts_with("gs_") {
-            games = self
-                .gamesheet
-                .scrape_games(from_date.format("%Y-%m-%d").to_string(), &site.site_name)
-                .await?;
-        } else {
-            let mut url = site.base_url.clone();
-            let s = match site.parser_type.as_str() {
-                "month_based" => format!("/Schedule/?Month={}&Year={}", mm, yyyy),
-                _ => format!("/Calendar/?Month={}&Year={}", mm, yyyy),
-            };
-
-            url.push_str(s.as_str());
-            println!("scraping {}", url);
-            // Make HTTP GET request
-            let contents = self.client.get_auto_redirect(&url, None).await?;
-            games = match site.parser_type.as_str() {
-                "month_based" => {
-                    month_based::parse_schedules(&site.site_name, contents, &mm, &yyyy)?
-                }
-                _ => self.scrape_games(&site.site_name, &contents)?,
-            };
-        }
+        let games = match site.parser_type.as_str() {
+            "day_details" => {
+                day_deails::get_games(
+                    self.client.clone(),
+                    &site.site_name,
+                    &site.base_url,
+                    &mm,
+                    &yyyy,
+                )
+                .await?
+            }
+            "month_based" => {
+                month_based::get_games(
+                    self.client.clone(),
+                    &site.site_name,
+                    &site.base_url,
+                    &mm,
+                    &yyyy,
+                )
+                .await?
+            }
+            _ => self.custom_get_games(&site, &mm, &yyyy).await?,
+        };
 
         println!("Scraped {} games from {}", games.len(), site.site_name);
 
@@ -167,121 +147,24 @@ impl Scraper {
         Ok(games)
     }
 
-    pub fn scrape_games(&self, site_name: &str, contents: &str) -> Result<Vec<ScrapedGame>> {
-        let doc = Html::parse_document(contents);
-        let mut games: Vec<ScrapedGame> = Vec::new();
-
-        for ds in doc.select(&*DAY_DETAILS_SELECTOR) {
-            let id = ds
-                .attr("id")
-                .ok_or_else(|| anyhow::anyhow!("id not found"))?;
-
-            let id = id.replace("day-", "");
-            // println!("{}", id);
-
-            let dt = chrono::NaiveDate::parse_from_str(&id, "%b-%d-%Y")
-                .context("failed to parse date")?;
-
-            for item in ds.select(&*EVENT_LIST_SELECTOR) {
-                if item.text().any(|t| {
-                    let t = t.to_lowercase();
-                    t.contains("practice")
-                        || t.contains("tournament")
-                        || t.contains("all day")
-                        || t.contains("cancelled")
-                        || t.contains("time-secondary")
-                }) {
-                    continue;
-                }
-                let game = self.scrape_game(item, dt, site_name);
-                let game = match game {
-                    Ok(g) => g,
-                    Err(e) => {
-                        eprintln!("{}", e);
-                        continue;
-                    }
-                };
-
-                games.push(game);
+    async fn custom_get_games(
+        &self,
+        site: &SitesConfig,
+        mm: &str,
+        yyyy: &str,
+    ) -> Result<Vec<ScrapedGame>> {
+        match site.site_name.as_str() {
+            s if s.starts_with("gs_") => {
+                let from_date = format!("{}-{}-01", yyyy, mm);
+                self.gamesheet
+                    .scrape_games(from_date, &site.site_name)
+                    .await
             }
+            "atlantichockeyfederation" => {
+                atlantic::get_games(self.client.clone(), &site.site_name, mm, yyyy).await
+            }
+            _ => return Err(anyhow::anyhow!("unsupported site {}", site.site_name)),
         }
-
-        Ok(games)
-    }
-
-    fn scrape_game(&self, item: ElementRef, dt: NaiveDate, site_name: &str) -> Result<ScrapedGame> {
-        let tt = item
-            .select(&*TIME_SELECTOR)
-            .next()
-            .context("time not found")?;
-
-        let ts = tt.text().next().context("time ts not found")?;
-        let tt = chrono::NaiveTime::parse_from_str(ts, "%I:%M %p").context("date not found")?;
-        let dt = dt.and_time(tt);
-
-        let subj_owner = item
-            .select(&*SUBJECT_OWNER_SELECTOR)
-            .next()
-            .context("subj owner not found")?;
-
-        let subj_text = item
-            .select(&*SUBJECT_TEXT_SELECTOR)
-            .next()
-            .context("subj text not found")?;
-
-        let subj_owner = subj_owner.text().next().unwrap();
-        let subj_text = subj_text.text().next().unwrap();
-
-        let home_team: String;
-        let away_team: String;
-        if subj_text.contains("@ ") {
-            home_team = subj_text.replace("@ ", "");
-            away_team = subj_owner.into();
-        } else {
-            home_team = subj_owner.into();
-            away_team = subj_text.replace("vs ", "").into();
-        }
-
-        let loc = item
-            .select(&*LOCATION_SELECTOR)
-            .next()
-            .context("location selector not found")?;
-
-        let loc = loc.text().next().unwrap();
-
-        let division = match item.select(&*GROUP_SELECTOR).next() {
-            Some(group) => group.text().next().unwrap(),
-            _ => subj_owner,
-        };
-
-        let address_node = item
-            .first_child()
-            .context("first child not found 1")?
-            .first_child()
-            .context("grand child not found 2")?
-            .children()
-            .nth(2)
-            .context("second node not found 3")?
-            .first_child()
-            .context("first child not found 4")?;
-
-        let address_element = address_node
-            .value()
-            .as_element()
-            .context("element not found")?;
-
-        let address_url = address_element.attr("href").context("href not found")?;
-
-        Ok(ScrapedGame {
-            site_name: site_name.into(),
-            date: dt,
-            division: division.into(),
-            home_team: home_team,
-            away_team,
-            location: loc.into(),
-            address_url: address_url.into(),
-            address: "".into(),
-        })
     }
 
     pub fn scrape_local_address(&self, contents: &str) -> Result<String> {

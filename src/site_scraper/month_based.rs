@@ -1,8 +1,9 @@
 use anyhow::Result;
 // use diesel::prelude::MysqlConnection;
+use crate::client;
 use crate::site_scraper::ScrapedGame;
 use scraper::{ElementRef, Selector};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 static DAY_DETAILS_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div.day-details").unwrap());
@@ -26,6 +27,19 @@ static GROUP_SELECTOR: LazyLock<Selector> =
 
 static LOC_LINK_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div > div > div:nth-of-type(3) > a").unwrap());
+
+pub async fn get_games(
+    client: Arc<client::HttpClient>,
+    site: &str,
+    base_url: &str,
+    mm: &str,
+    yyyy: &str,
+) -> Result<Vec<ScrapedGame>> {
+    let url = base_url.to_owned() + format!("/Schedule/?Month={}&Year={}", mm, yyyy).as_str();
+    let contents = client.get_auto_redirect(&url, None).await?;
+
+    parse_schedules(site, contents, mm, yyyy)
+}
 
 pub fn parse_schedules(
     site: &str,
