@@ -53,6 +53,8 @@ impl AddressFetcher {
                 .to_string();
         }
 
+        let use_captcha = class == "local";
+
         let mut current_addr = self.get_cached(&scrape_url);
         let orig_addr = current_addr.clone();
 
@@ -75,7 +77,7 @@ impl AddressFetcher {
             }
 
             // Fetch URL while holding write lock
-            match self.client.get(&scrape_url).await? {
+            match self.client.get(&scrape_url, use_captcha).await? {
                 Response::Content(contents) => {
                     // Scrape address
                     let address = if is_local {

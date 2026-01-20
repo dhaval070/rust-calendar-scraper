@@ -36,22 +36,6 @@ impl HttpClient {
             )
             .unwrap(),
         );
-        // MBSW_IS_HUMAN=Passed Dec-26 3:03 AM; expires=Wed, 31-Dec-2025 08:03:01 GMT; path=/; SameSite=Strict
-        let mut cookie_value = String::from("MBSW_IS_HUMAN=Passed ");
-        let now = chrono::Utc::now() - Duration::days(1);
-        let from_dt = now.format("%b-%d %I:%M %P").to_string();
-        let upto = now + Duration::days(7);
-        let to_dt = upto.format("%a, %d-%b-%Y %H:%M:%S").to_string();
-
-        cookie_value.push_str(&from_dt);
-        cookie_value.push_str("; expires=");
-        cookie_value.push_str(&to_dt);
-        cookie_value.push_str(" GMT; path=/; SameSite=Strict");
-
-        headers.insert(
-            header::COOKIE,
-            HeaderValue::from_str(cookie_value.as_str()).unwrap(),
-        );
 
         let c = reqwest::Client::builder()
             .timeout(time::Duration::from_secs(120))
@@ -84,7 +68,7 @@ impl HttpClient {
         }
     }
 
-    pub async fn get(&self, url: &str) -> Result<Response> {
+    pub async fn get(&self, url: &str, use_captcha: bool) -> Result<Response> {
         let u = http::uri::Uri::from_str(url)?;
         let host = u.host().unwrap().to_string();
 
@@ -117,9 +101,13 @@ impl HttpClient {
                 let mut n = self.total_retry.lock().await;
                 *n += 1;
             }
-            let r = self.client.get(url).send().await;
 
-            let response = match r {
+            let mut rb = self.client.get(url);
+            if use_captcha {
+                rb = rb.header(header::COOKIE, captcha_header());
+            }
+
+            let response = match rb.send().await {
                 Ok(s) => s,
                 Err(e) => {
                     drop(_global_permit);
@@ -263,6 +251,20 @@ impl HttpClient {
         eprintln!("{:<30}: {}", "Total Retries", *total_retry);
         eprintln!("{:<30}: {}", "Total Failed", *total_failed);
     }
+}
+
+fn captcha_header() -> HeaderValue {
+    // MBSW_IS_HUMAN=Passed Dec-26 3:03 AM; expires=Wed, 31-Dec-2025 08:03:01 GMT; path=/; SameSite=Strict
+    let cookie_value = String::from("MBSW_IS_HUMAN=Passed ");
+    let now = chrono::Utc::now() - Duration::days(1);
+    let from_dt = now.format("%b-%d %I:%M %P").to_string();
+    let upto = now + Duration::days(7);
+    let to_dt = upto.format("%a, %d-%b-%Y %H:%M:%S").to_string();
+
+    let cookie_value =
+        cookie_value + &from_dt + "; expires=" + &to_dt + " GMT; path=/; SameSite=Strict";
+
+    HeaderValue::from_str(&cookie_value).unwrap()
 }
 
 pub struct HttpClientCached {
