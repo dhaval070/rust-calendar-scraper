@@ -56,34 +56,33 @@ impl Repository<diesel::MysqlConnection> {
         }
     }
 
-    pub fn get_sites(&self, sites: Vec<&str>) -> Result<Vec<models::SitesConfig>> {
+    pub fn get_sites(&self, sites: Vec<&str>) -> Result<Vec<models::SitesConfigM>> {
         use schema::sites_config;
 
         let mut conn = self.pool.get()?;
 
-        if sites.len() == 1 && sites[0] == "all" {
-            let res = sites_config::table
+        let res: Vec<models::SitesConfig> = if sites.len() == 1 && sites[0] == "all" {
+            sites_config::table
                 .filter(schema::sites_config::enabled.eq(true))
                 .select(models::SitesConfig::as_select())
                 .load(&mut conn)
-                .unwrap();
-            return Ok(res);
+                .unwrap()
         } else if sites.len() == 1 && sites[0] == "all-gamesheet" {
-            let res = sites_config::table
+            sites_config::table
                 .filter(schema::sites_config::enabled.eq(true))
                 .filter(schema::sites_config::site_name.like("gs_%"))
                 .select(models::SitesConfig::as_select())
                 .load(&mut conn)
-                .unwrap();
-            return Ok(res);
-        }
-
-        let res = sites_config::table
-            .filter(sites_config::site_name.eq_any(sites))
-            .select(models::SitesConfig::as_select())
-            .load(&mut conn)
-            .unwrap();
-        Ok(res)
+                .unwrap()
+        } else {
+            sites_config::table
+                .filter(sites_config::site_name.eq_any(sites))
+                .select(models::SitesConfig::as_select())
+                .load(&mut conn)
+                .unwrap()
+        };
+        let resm: Vec<models::SitesConfigM> = res.into_iter().map(|sc| sc.into()).collect();
+        Ok(resm)
     }
 
     fn match_locations(&self, site: &str) -> Result<()> {
@@ -394,7 +393,14 @@ impl RepositoryOps for Repository<diesel::MysqlConnection> {
             .execute(&mut conn)?;
 
         match site_name {
-            s if s.starts_with("gs_") => self.match_gamesheet(site_name),
+            s if s.starts_with("gs_")
+                || s == "rockieshockeyleague"
+                || s == "allpeacehockey"
+                || s == "cahlhockey"
+                || s == "neahl" =>
+            {
+                self.match_gamesheet(site_name)
+            }
             _ => self.match_locations(site_name),
         }
     }

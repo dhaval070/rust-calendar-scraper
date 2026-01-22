@@ -5,13 +5,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use crate::client::HttpClient;
-use crate::models::{self, SitesConfig};
+use crate::models::{self, SitesConfigM};
 use crate::site_scraper::gamesheet::Gamesheet;
 use crate::{address_fetcher, repository};
 pub mod atlantic;
-pub mod day_deails;
+mod day_deails;
 pub mod gamesheet;
-pub mod month_based;
+mod month_based;
+mod rockies;
 
 static ADDRESS_SELECTOR: LazyLock<Selector> =
     LazyLock::new(|| Selector::parse("div.bg_primary > div > div > div > h2 > small").unwrap());
@@ -56,7 +57,7 @@ impl Scraper {
 
     pub async fn process_site(
         &self,
-        site: &models::SitesConfig,
+        site: &models::SitesConfigM,
         from_date: NaiveDate,
     ) -> Result<Vec<ScrapedGame>> {
         println!("processing site {}", site.site_name);
@@ -85,7 +86,7 @@ impl Scraper {
                 )
                 .await?
             }
-            _ => self.custom_get_games(&site, &mm, &yyyy).await?,
+            _ => self.custom_get_games(site, &mm, &yyyy).await?,
         };
 
         println!("Scraped {} games from {}", games.len(), site.site_name);
@@ -149,7 +150,7 @@ impl Scraper {
 
     async fn custom_get_games(
         &self,
-        site: &SitesConfig,
+        site: &SitesConfigM,
         mm: &str,
         yyyy: &str,
     ) -> Result<Vec<ScrapedGame>> {
@@ -162,6 +163,14 @@ impl Scraper {
             }
             "atlantichockeyfederation" => {
                 atlantic::get_games(self.client.clone(), &site.site_name, mm, yyyy).await
+            }
+            s if s == "rockieshockeyleague"
+                || s == "allpeacehockey"
+                || s == "cahlhockey"
+                || s == "neahl" =>
+            {
+                let r = rockies::Rockies::new(self.client.clone(), site.clone());
+                r.get_games(mm.to_string(), yyyy.to_string()).await
             }
             _ => return Err(anyhow::anyhow!("unsupported site {}", site.site_name)),
         }

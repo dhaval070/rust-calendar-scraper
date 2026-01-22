@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use chrono::Duration;
 use dashmap::DashMap;
 use http::HeaderValue;
@@ -173,7 +173,7 @@ impl HttpClient {
         if let Some(h) = headers {
             req = req.headers(h);
         }
-        let req = req.build()?;
+        let req = req.build().context(format!("request build error {}", u))?;
 
         // Get or create semaphore for this host (thread-safe)
         let sem = self

@@ -1,5 +1,7 @@
 use diesel::{HasQuery, Insertable, Queryable, Selectable};
+use serde::Deserialize;
 use std::collections::hash_map::HashMap;
+use std::fmt::Debug;
 
 #[derive(Debug, Queryable, Selectable)]
 #[diesel(table_name=crate::schema::sites_config)]
@@ -18,6 +20,54 @@ pub struct SitesConfig {
     pub notes: Option<String>,
     pub created_at: Option<chrono::NaiveDateTime>,
     pub updated_at: Option<chrono::NaiveDateTime>,
+}
+
+#[derive(Clone)]
+pub struct SitesConfigM {
+    pub id: i32,
+    pub site_name: String,
+    pub display_name: Option<String>,
+    pub base_url: String,
+    pub home_team: Option<String>,
+    pub parser_type: String,
+    pub parser_config: Option<serde_json::Value>,
+    pub enabled: Option<bool>,
+    pub last_scraped_at: Option<chrono::NaiveDateTime>,
+    pub scrape_frequency_hours: Option<i32>,
+    pub notes: Option<String>,
+    pub created_at: Option<chrono::NaiveDateTime>,
+    pub updated_at: Option<chrono::NaiveDateTime>,
+    pub parse_config_json: Option<ParserConfig>,
+}
+
+impl From<SitesConfig> for SitesConfigM {
+    fn from(value: SitesConfig) -> Self {
+        let mut pcc = None;
+        if let Some(pc) = &value.parser_config {
+            pcc = Some(serde_json::from_value(pc.clone()).unwrap());
+        }
+        Self {
+            id: value.id,
+            site_name: value.site_name.clone(),
+            display_name: value.display_name.clone(),
+            base_url: value.base_url.clone(),
+            home_team: value.home_team.clone(),
+            parser_type: value.parser_type.clone(),
+            parser_config: value.parser_config.clone(),
+            enabled: value.enabled.clone(),
+            last_scraped_at: value.last_scraped_at.clone(),
+            scrape_frequency_hours: value.scrape_frequency_hours.clone(),
+            notes: value.notes.clone(),
+            created_at: value.created_at.clone(),
+            updated_at: value.updated_at.clone(),
+            parse_config_json: pcc,
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct ParserConfig {
+    pub game_type: Option<Vec<String>>,
 }
 
 #[derive(Insertable)]
