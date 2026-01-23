@@ -15,6 +15,9 @@ pub struct AppConfig {
 
     #[serde(rename = "GAMESHEET_API_KEY")]
     pub gamesheet_api_key: String,
+
+    #[serde(rename = "ADDRESS_CACHE_FILE")]
+    pub address_cache_file: String,
 }
 
 pub fn load() -> AppConfig {

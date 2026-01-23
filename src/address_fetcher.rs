@@ -3,9 +3,12 @@ use anyhow::anyhow;
 use anyhow::{Context, Result};
 use dashmap::DashMap;
 use scraper::{Html, Selector};
+use std::io::Write;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use tempfile;
 use tokio::sync::RwLock;
+use wincode;
 
 pub struct AddressFetcher {
     client: Arc<HttpClient>,
@@ -176,9 +179,10 @@ impl AddressFetcher {
         let mut result: Vec<(String, String)> = Vec::with_capacity(col.len());
 
         for item in col.into_iter() {
-            let v = item.1.read().await;
-            if v.status == AddressStatus::Ready {
-                result.push((item.0, v.address.clone()));
+            if let Ok(v) = item.1.try_read() {
+                if v.status == AddressStatus::Ready {
+                    result.push((item.0, v.address.clone()));
+                }
             }
         }
         result
@@ -193,5 +197,33 @@ impl AddressFetcher {
                 }))
             });
         }
+    }
+}
+
+pub async fn write_snapshot(f: Arc<AddressFetcher>, file_path: String) {
+    let path = std::path::Path::new(&file_path);
+    let dirname = path.parent().unwrap();
+
+    let snapshot = f.get_snapshot().await;
+
+    if snapshot.len() == 0 {
+        return;
+    }
+
+    println!("snapshot entries {}", snapshot.len());
+
+    let data = wincode::serialize(&snapshot).unwrap();
+
+    let tmp_file = tempfile::NamedTempFile::new_in(dirname).unwrap();
+    let mut fh = tmp_file.as_file();
+
+    fh.write(&data).unwrap();
+    std::fs::rename(tmp_file.into_temp_path(), &file_path).unwrap();
+}
+
+pub async fn snapshot_loop(f: Arc<AddressFetcher>, file_path: String) {
+    loop {
+        write_snapshot(f.clone(), file_path.clone()).await;
+        tokio::time::sleep(tokio::time::Duration::new(30, 0)).await;
     }
 }

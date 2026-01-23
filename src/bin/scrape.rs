@@ -52,6 +52,17 @@ async fn main() {
 
     let addr_fetcher = Arc::new(address_fetcher::AddressFetcher::new(client.clone()));
 
+    if cfg.address_cache_file != "" {
+        let bdata = std::fs::read(&cfg.address_cache_file).unwrap();
+        let data: Vec<(String, String)> = wincode::deserialize(&bdata).unwrap();
+        println!("cache entries loaded {}", data.len());
+        addr_fetcher.load(data);
+
+        let af = addr_fetcher.clone();
+        let path = cfg.address_cache_file.clone();
+        tokio::spawn(address_fetcher::snapshot_loop(af, path));
+    }
+
     let seasons = repo.gamesheet_season_map();
     let scraper = Arc::new(site_scraper::Scraper::new(
         client.clone(),
@@ -131,6 +142,10 @@ async fn main() {
 
     for h in handles {
         h.await.unwrap();
+    }
+
+    if cfg.address_cache_file != "" {
+        address_fetcher::write_snapshot(addr_fetcher.clone(), cfg.address_cache_file.into()).await;
     }
 
     eprintln!("\n\nSUMMARY");
