@@ -83,11 +83,16 @@ impl AddressFetcher {
             match self.client.get(&scrape_url, use_captcha).await? {
                 Response::Content(contents) => {
                     // Scrape address
-                    let address = if is_local {
-                        self.scrape_local_address(&contents)
+                    let address;
+                    if scrape_url.contains("rinkdb.com") {
+                        address = self.scrape_rinkdb(&contents);
                     } else {
-                        self.scrape_remote_address(&contents)
-                    };
+                        address = if is_local {
+                            self.scrape_local_address(&contents)
+                        } else {
+                            self.scrape_remote_address(&contents)
+                        };
+                    }
 
                     if let Ok(ad) = &address {
                         lock.address = ad.clone();
@@ -117,6 +122,20 @@ impl AddressFetcher {
                 }
             };
         }
+    }
+
+    pub fn scrape_rinkdb(&self, contents: &str) -> Result<String> {
+        let doc = Html::parse_document(contents);
+        let sel = Selector::parse("div.container-fluid > div > h3")
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        let n: Vec<&str> = doc
+            .select(&sel)
+            .map(|e| e.text().next().unwrap_or_default())
+            .collect();
+
+        let addr = n.join(" ");
+        Ok(addr)
     }
 
     pub fn scrape_local_address(&self, contents: &str) -> Result<String> {
